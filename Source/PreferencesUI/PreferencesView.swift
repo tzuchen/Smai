@@ -668,6 +668,35 @@ private struct AdvancedPreferencesView: View {
             Divider()
                 .padding(.vertical, 5)
 
+            PreferenceRow(localized("AI-Assisted Candidate Selection:")) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Toggle(localized("Enable AI Assistance"), isOn: $preferences.afmAssistEnabled)
+
+                    Toggle(localized("Punctuation Correction"), isOn: $preferences.afmPunctuationFixEnabled)
+                        .disabled(!preferences.afmAssistEnabled)
+                        .padding(.leading, 16)
+
+                    Toggle(localized("Near-Homophone & Tone Correction"), isOn: $preferences.afmNearPhoneticFixEnabled)
+                        .disabled(!preferences.afmAssistEnabled)
+                        .padding(.leading, 16)
+
+                    Toggle(localized("Semantic Fluency Rewrite"), isOn: $preferences.afmSemanticFluencyRewriteEnabled)
+                        .disabled(!preferences.afmAssistEnabled)
+                        .padding(.leading, 16)
+
+                    Toggle(localized("Cloze Filling (??)"), isOn: $preferences.afmClozeFillingEnabled)
+                        .disabled(!preferences.afmAssistEnabled)
+                        .padding(.leading, 16)
+
+                    Toggle(localized("LLM Prompt Optimization (>> prefix)"), isOn: $preferences.afmPromptOptimizerEnabled)
+                        .disabled(!preferences.afmAssistEnabled)
+                        .padding(.leading, 16)
+                }
+            }
+
+            Divider()
+                .padding(.vertical, 5)
+
             PreferenceRow {
                 VStack(alignment: .leading, spacing: 8) {
                     Button(localized("Create System Report")) {

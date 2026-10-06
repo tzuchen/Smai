@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>English</string>
 	<key>CFBundleDisplayName</key>
-	<string>McBopomofo AFM</string>
+	<string>思脈注音</string>
 	<key>CFBundleExecutable</key>
 	<string>${EXECUTABLE_NAME}</string>
 	<key>CFBundleIdentifier</key>
@@ -17,16 +17,16 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>3.1.1-afm.9</string>
+	<string>1.0.0</string>
 	<key>CFBundleSignature</key>
 	<string>BPMF</string>
 	<key>CFBundleVersion</key>
-	<string>2519</string>
+	<string>1000</string>
 	<key>ComponentInputModeDict</key>
 	<dict>
 		<key>tsInputModeListKey</key>
 		<dict>
-			<key>org.orin.inputmethod.McBopomofoAFM.Bopomofo</key>
+			<key>org.orin.inputmethod.Smai.Bopomofo</key>
 			<dict>
 				<key>TISDoubleSpaceSubstitution</key>
 				<string>。</string>
@@ -54,7 +54,7 @@
 				<key>tsInputModeScriptKey</key>
 				<string>smTradChinese</string>
 			</dict>
-			<key>org.orin.inputmethod.McBopomofoAFM.PlainBopomofo</key>
+			<key>org.orin.inputmethod.Smai.PlainBopomofo</key>
 			<dict>
 				<key>TISDoubleSpaceSubstitution</key>
 				<string>。</string>
@@ -85,12 +85,12 @@
 		</dict>
 		<key>tsVisibleInputModeOrderedArrayKey</key>
 		<array>
-			<string>org.orin.inputmethod.McBopomofoAFM.Bopomofo</string>
-			<string>org.orin.inputmethod.McBopomofoAFM.PlainBopomofo</string>
+			<string>org.orin.inputmethod.Smai.Bopomofo</string>
+			<string>org.orin.inputmethod.Smai.PlainBopomofo</string>
 		</array>
 	</dict>
 	<key>InputMethodConnectionName</key>
-	<string>McBopomofoAFM_1_Connection</string>
+	<string>Smai_1_Connection</string>
 	<key>InputMethodServerControllerClass</key>
 	<string>McBopomofoInputMethodController</string>
 	<key>InputMethodServerDelegateClass</key>
@@ -322,7 +322,7 @@
 	<key>TICapsLockLanguageSwitchCapable</key>
 	<true/>
 	<key>TISInputSourceID</key>
-	<string>org.orin.inputmethod.McBopomofoAFM</string>
+	<string>org.orin.inputmethod.Smai</string>
 	<key>TISIntendedLanguage</key>
 	<string>zh-Hant</string>
 	<key>TISParticipatesInTouchBar</key>

@@ -1,8 +1,8 @@
 /* No comment provided by engineer. */
-"About McBopomofo…" = "關於小麥注音…";
+"About McBopomofo…" = "關於思脈注音…";
 
 /* No comment provided by engineer. */
-"McBopomofo Preferences" = "小麥注音偏好設定";
+"McBopomofo Preferences" = "思脈注音偏好設定";
 
 /* No comment provided by engineer. */
 "Check for Updates…" = "檢查是否有新版…";
@@ -259,4 +259,12 @@
 
 "Quick Text Transform" = "日韓多語拼音轉換";
 
-"AI-Assisted Candidate Selection" = "AI 輔助選字";
+"AI-Assisted Candidate Selection" = "AI 智慧整句輔助";
+"AI-Assisted Candidate Selection:" = "AI 智慧整句輔助：";
+"Enable AI Assistance" = "啟用 AI 智慧輔助";
+"Punctuation Correction" = "標點符號修正";
+"Near-Homophone & Tone Correction" = "同音與似音錯字修正";
+"Semantic Fluency Rewrite" = "語意不通順修飾（字數不必相同）";
+"Cloze Filling (??)" = "填空選詞輔助（輸入 ?? 自動匹配）";
+"LLM Prompt Optimization (>>)" = "LLM 指令優化（以 >> 開頭）";
+"LLM Prompt Optimization (>> prefix)" = "LLM 指令優化（以 >> 開頭）";

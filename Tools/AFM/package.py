@@ -24,16 +24,16 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 # Expected identity values from Source/McBopomofo-Info.plist
-EXPECTED_BUNDLE_ID = "org.orin.inputmethod.McBopomofoAFM"
-EXPECTED_CONNECTION_NAME = "McBopomofoAFM_1_Connection"
+EXPECTED_BUNDLE_ID = "org.orin.inputmethod.Smai"
+EXPECTED_CONNECTION_NAME = "Smai_1_Connection"
 EXPECTED_MODE_IDS = [
-    "org.orin.inputmethod.McBopomofoAFM.Bopomofo",
-    "org.orin.inputmethod.McBopomofoAFM.PlainBopomofo",
+    "org.orin.inputmethod.Smai.Bopomofo",
+    "org.orin.inputmethod.Smai.PlainBopomofo",
 ]
 
 # Default paths
 DEFAULT_SOURCE_APP = REPO_ROOT / ".build" / "xcode" / "Build" / "Products" / "Debug" / "McBopomofo.app"
-DEFAULT_OUTPUT = REPO_ROOT / ".build" / "afm-distribution" / "McBopomofoAFM.app"
+DEFAULT_OUTPUT = REPO_ROOT / ".build" / "afm-distribution" / "Smai.app"
 
 def sha256_file(path: Path) -> str:
     """Compute SHA-256 hash of a file."""

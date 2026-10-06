@@ -395,6 +395,12 @@ if CommandLine.arguments.count > 1 {
         let asciiCommaZero = (AFMTriggerPolicy.delayNanoseconds(for: ",") == 0)
         let asciiPeriodZero = (AFMTriggerPolicy.delayNanoseconds(for: ".") == 0)
         let asciiQuestionZero = (AFMTriggerPolicy.delayNanoseconds(for: "?") == 0)
+        let doubleQuestionAsciiZero = (AFMTriggerPolicy.delayNanoseconds(for: "??") == 0)
+        let doubleQuestionFullwidthZero = (AFMTriggerPolicy.delayNanoseconds(for: "？？") == 0)
+        let midDoubleQuestionZero = (AFMTriggerPolicy.delayNanoseconds(for: "這家店很??不想再來") == 0)
+        let promptOptTrailingZero = (AFMTriggerPolicy.delayNanoseconds(for: ">>測試任務>>") == 0)
+        let promptOptPunctZero = (AFMTriggerPolicy.delayNanoseconds(for: ">>測試任務。") == 0)
+        let promptOptDebounce = (AFMTriggerPolicy.delayNanoseconds(for: ">>測試任務") == 600_000_000)
         let asciiSpaceZero = (AFMTriggerPolicy.delayNanoseconds(for: " ") == 0)
         let fullwidthSpaceZero = (AFMTriggerPolicy.delayNanoseconds(for: "\u{3000}") == 0)
 
@@ -406,6 +412,12 @@ if CommandLine.arguments.count > 1 {
             && asciiCommaZero
             && asciiPeriodZero
             && asciiQuestionZero
+            && doubleQuestionAsciiZero
+            && doubleQuestionFullwidthZero
+            && midDoubleQuestionZero
+            && promptOptTrailingZero
+            && promptOptPunctZero
+            && promptOptDebounce
             && asciiSpaceZero
             && fullwidthSpaceZero
 

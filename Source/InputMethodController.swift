@@ -42,6 +42,21 @@ private let kMinKeyLabelSize: CGFloat = 10
 
 struct AFMTriggerPolicy {
     static func delayNanoseconds(for text: String) -> UInt64 {
+        if text.hasPrefix(">>") || text.hasPrefix("》》") {
+            if text.hasSuffix(">>") || text.hasSuffix("》》") {
+                return 0
+            }
+            if let lastChar = text.last {
+                let punctuationSet: Set<Character> = ["，", "。", "！", "？", "；", "：", "、", ",", ".", "!", "?", ";", ":", " ", "\u{3000}"]
+                if punctuationSet.contains(lastChar) {
+                    return 0
+                }
+            }
+            return 600_000_000
+        }
+        if text.contains("??") || text.contains("？？") {
+            return 0
+        }
         guard let lastChar = text.last else {
             return 350_000_000
         }
@@ -148,7 +163,7 @@ class McBopomofoInputMethodController: IMKInputController {
     private var afmTask: Task<Void, Never>?
 
 
-    private let afmDiagnosticsMarkerPath = "/Users/Shared/McBopomofoAFM-diagnostics.enabled"
+    private let afmDiagnosticsMarkerPath = "/Users/Shared/Smai-diagnostics.enabled"
     private let afmDiagnosticsMaxEvents = 200
     private var afmDiagnosticsEventCount = 0
 
@@ -213,6 +228,41 @@ class McBopomofoInputMethodController: IMKInputController {
                 withTitle: NSLocalizedString("AI-Assisted Candidate Selection", comment: ""),
                 action: #selector(toggleAFMAssist(_:)), keyEquivalent: "")
             afmAssistItem.state = Preferences.afmAssistEnabled.state
+
+            let afmSubmenu = NSMenu(title: "AI Assist")
+            let masterItem = afmSubmenu.addItem(
+                withTitle: NSLocalizedString("Enable AI Assistance", comment: ""),
+                action: #selector(toggleAFMAssist(_:)), keyEquivalent: "")
+            masterItem.state = Preferences.afmAssistEnabled.state
+
+            afmSubmenu.addItem(NSMenuItem.separator())
+
+            let punctItem = afmSubmenu.addItem(
+                withTitle: NSLocalizedString("Punctuation Correction", comment: ""),
+                action: #selector(toggleAFMPunctuationFix(_:)), keyEquivalent: "")
+            punctItem.state = Preferences.afmPunctuationFixEnabled.state
+
+            let phoneticItem = afmSubmenu.addItem(
+                withTitle: NSLocalizedString("Near-Homophone & Tone Correction", comment: ""),
+                action: #selector(toggleAFMNearPhoneticFix(_:)), keyEquivalent: "")
+            phoneticItem.state = Preferences.afmNearPhoneticFixEnabled.state
+
+            let fluencyItem = afmSubmenu.addItem(
+                withTitle: NSLocalizedString("Semantic Fluency Rewrite", comment: ""),
+                action: #selector(toggleAFMSemanticFluencyRewrite(_:)), keyEquivalent: "")
+            fluencyItem.state = Preferences.afmSemanticFluencyRewriteEnabled.state
+
+            let clozeItem = afmSubmenu.addItem(
+                withTitle: NSLocalizedString("Cloze Filling (??)", comment: ""),
+                action: #selector(toggleAFMClozeFilling(_:)), keyEquivalent: "")
+            clozeItem.state = Preferences.afmClozeFillingEnabled.state
+
+            let promptOptItem = afmSubmenu.addItem(
+                withTitle: NSLocalizedString("LLM Prompt Optimization (>>)", comment: ""),
+                action: #selector(toggleAFMPromptOptimizer(_:)), keyEquivalent: "")
+            promptOptItem.state = Preferences.afmPromptOptimizerEnabled.state
+
+            afmAssistItem.submenu = afmSubmenu
         }
 
         menu.addItem(NSMenuItem.separator())
@@ -319,6 +369,12 @@ class McBopomofoInputMethodController: IMKInputController {
 
     override func commitComposition(_ client: Any!) {
         cancelAFMRequest()
+        if let inputting = state as? InputState.Inputting {
+            commit(text: inputting.composingBuffer, client: client)
+            keyHandler.clear()
+            handle(state: InputState.Empty(), client: client)
+            return
+        }
         keyHandler.handleForceCommit(stateCallback: { newState in
             self.handle(state: newState, client: client)
         })
@@ -741,6 +797,26 @@ class McBopomofoInputMethodController: IMKInputController {
         cancelAFMRequest()
     }
 
+    @objc func toggleAFMPunctuationFix(_ sender: Any?) {
+        Preferences.afmPunctuationFixEnabled = !Preferences.afmPunctuationFixEnabled
+    }
+
+    @objc func toggleAFMNearPhoneticFix(_ sender: Any?) {
+        Preferences.afmNearPhoneticFixEnabled = !Preferences.afmNearPhoneticFixEnabled
+    }
+
+    @objc func toggleAFMSemanticFluencyRewrite(_ sender: Any?) {
+        Preferences.afmSemanticFluencyRewriteEnabled = !Preferences.afmSemanticFluencyRewriteEnabled
+    }
+
+    @objc func toggleAFMClozeFilling(_ sender: Any?) {
+        Preferences.afmClozeFillingEnabled = !Preferences.afmClozeFillingEnabled
+    }
+
+    @objc func toggleAFMPromptOptimizer(_ sender: Any?) {
+        Preferences.afmPromptOptimizerEnabled = !Preferences.afmPromptOptimizerEnabled
+    }
+
     @objc func checkForUpdate(_ sender: Any?) {
         (NSApp.delegate as? AppDelegate)?.checkForUpdate(forced: true)
     }
@@ -912,6 +988,12 @@ extension McBopomofoInputMethodController {
             return
         }
 
+        // If the composing buffer was already highlighted by AFM, do not re-dispatch
+        // until the user actually types new keys.
+        if !inputting.afmHighlightedRanges.isEmpty || inputting.afmHighlightedRange.location != NSNotFound {
+            return
+        }
+
         let sentence = inputting.composingBuffer
         let sentenceLen = (sentence as NSString).length
         guard sentenceLen >= 2 else {
@@ -996,36 +1078,56 @@ extension McBopomofoInputMethodController {
 
             let origNS = sentence as NSString
             let corrNS = correctedSentence as NSString
-            guard origNS.length == corrNS.length else {
-                capturedClient.setMarkedText(
-                    capturedInputting.attributedString,
-                    selectionRange: NSMakeRange(Int(capturedInputting.cursorIndex), 0),
-                    replacementRange: NSMakeRange(NSNotFound, NSNotFound)
-                )
-                AFMDevLogger.shared.log("AFM WHOLE-SENTENCE LENGTH MISMATCH: orig='\(sentence)', corr='\(correctedSentence)'")
-                return
+            let hasCloze = sentence.contains("??") || sentence.contains("？？")
+            let isPromptOptimization = (sentence.hasPrefix(">>") || sentence.hasPrefix("》》")) && Preferences.afmPromptOptimizerEnabled
+            let allowsLengthChange = (hasCloze && Preferences.afmClozeFillingEnabled) || Preferences.afmSemanticFluencyRewriteEnabled || isPromptOptimization
+
+            if !allowsLengthChange {
+                guard origNS.length == corrNS.length else {
+                    capturedClient.setMarkedText(
+                        capturedInputting.attributedString,
+                        selectionRange: NSMakeRange(Int(capturedInputting.cursorIndex), 0),
+                        replacementRange: NSMakeRange(NSNotFound, NSNotFound)
+                    )
+                    AFMDevLogger.shared.log("AFM WHOLE-SENTENCE LENGTH MISMATCH: orig='\(sentence)', corr='\(correctedSentence)'")
+                    return
+                }
             }
 
             // Find all changed ranges
-            var changedRanges: [NSRange] = []
-            var currentStart: Int? = nil
+            let changedRanges: [NSRange]
+            let newCursorIndex: UInt
 
-            for i in 0..<origNS.length {
-                let origChar = origNS.character(at: i)
-                let corrChar = corrNS.character(at: i)
-                if origChar != corrChar {
-                    if currentStart == nil {
-                        currentStart = i
-                    }
-                } else {
-                    if let start = currentStart {
-                        changedRanges.append(NSRange(location: start, length: i - start))
-                        currentStart = nil
+            if isPromptOptimization {
+                changedRanges = [NSRange(location: 0, length: corrNS.length)]
+                newCursorIndex = UInt(corrNS.length)
+            } else if origNS.length == corrNS.length {
+                var ranges: [NSRange] = []
+                var currentStart: Int? = nil
+
+                for i in 0..<origNS.length {
+                    let origChar = origNS.character(at: i)
+                    let corrChar = corrNS.character(at: i)
+                    if origChar != corrChar {
+                        if currentStart == nil {
+                            currentStart = i
+                        }
+                    } else {
+                        if let start = currentStart {
+                            ranges.append(NSRange(location: start, length: i - start))
+                            currentStart = nil
+                        }
                     }
                 }
-            }
-            if let start = currentStart {
-                changedRanges.append(NSRange(location: start, length: origNS.length - start))
+                if let start = currentStart {
+                    ranges.append(NSRange(location: start, length: origNS.length - start))
+                }
+                changedRanges = ranges
+                newCursorIndex = capturedInputting.cursorIndex
+            } else {
+                let diffRange = self.findChangedRange(old: origNS, new: corrNS)
+                changedRanges = [diffRange]
+                newCursorIndex = UInt(corrNS.length)
             }
 
             guard !changedRanges.isEmpty else {
@@ -1040,7 +1142,7 @@ extension McBopomofoInputMethodController {
             // Create new inputting state with corrected text and highlights!
             let newState = InputState.Inputting(
                 composingBuffer: correctedSentence,
-                cursorIndex: capturedInputting.cursorIndex
+                cursorIndex: newCursorIndex
             )
             newState.afmHighlightedRanges = changedRanges.map { NSValue(range: $0) }
             if let firstRange = changedRanges.first {

@@ -1,8 +1,8 @@
 /* No comment provided by engineer. */
-"About McBopomofo…" = "About McBopomofo…";
+"About McBopomofo…" = "About Smai…";
 
 /* No comment provided by engineer. */
-"McBopomofo Preferences" = "McBopomofo Preferences";
+"McBopomofo Preferences" = "Smai Preferences";
 
 /* No comment provided by engineer. */
 "Check for Updates…" = "Check for Updates…";
@@ -260,3 +260,11 @@
 "Quick Text Transform" = "Quick Text Transform";
 
 "AI-Assisted Candidate Selection" = "AI-Assisted Candidate Selection";
+"AI-Assisted Candidate Selection:" = "AI-Assisted Candidate Selection:";
+"Enable AI Assistance" = "Enable AI Assistance";
+"Punctuation Correction" = "Punctuation Correction";
+"Near-Homophone & Tone Correction" = "Near-Homophone & Tone Correction";
+"Semantic Fluency Rewrite" = "Semantic Fluency Rewrite";
+"Cloze Filling (??)" = "Cloze Filling (??)";
+"LLM Prompt Optimization (>>)" = "LLM Prompt Optimization (>>)";
+"LLM Prompt Optimization (>> prefix)" = "LLM Prompt Optimization (>> prefix)";

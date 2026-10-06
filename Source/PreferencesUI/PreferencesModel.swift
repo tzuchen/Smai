@@ -261,6 +261,54 @@ final class PreferencesViewModel: NSObject, ObservableObject {
         }
     }
 
+    var afmAssistEnabled: Bool {
+        get { Preferences.afmAssistEnabled }
+        set {
+            objectWillChange.send()
+            Preferences.afmAssistEnabled = newValue
+        }
+    }
+
+    var afmPunctuationFixEnabled: Bool {
+        get { Preferences.afmPunctuationFixEnabled }
+        set {
+            objectWillChange.send()
+            Preferences.afmPunctuationFixEnabled = newValue
+        }
+    }
+
+    var afmNearPhoneticFixEnabled: Bool {
+        get { Preferences.afmNearPhoneticFixEnabled }
+        set {
+            objectWillChange.send()
+            Preferences.afmNearPhoneticFixEnabled = newValue
+        }
+    }
+
+    var afmSemanticFluencyRewriteEnabled: Bool {
+        get { Preferences.afmSemanticFluencyRewriteEnabled }
+        set {
+            objectWillChange.send()
+            Preferences.afmSemanticFluencyRewriteEnabled = newValue
+        }
+    }
+
+    var afmClozeFillingEnabled: Bool {
+        get { Preferences.afmClozeFillingEnabled }
+        set {
+            objectWillChange.send()
+            Preferences.afmClozeFillingEnabled = newValue
+        }
+    }
+
+    var afmPromptOptimizerEnabled: Bool {
+        get { Preferences.afmPromptOptimizerEnabled }
+        set {
+            objectWillChange.send()
+            Preferences.afmPromptOptimizerEnabled = newValue
+        }
+    }
+
     @Published private(set) var latestSystemReport = ""
 
     var effectiveUserPhraseLocation: String {

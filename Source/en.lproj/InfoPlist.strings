@@ -1,6 +1,6 @@
-CFBundleName = "McBopomofo AFM";
-CFBundleDisplayName = "McBopomofo AFM";
-NSHumanReadableCopyright = "Copyright © 2011-2026 Mengjuei Hsieh et al.\nAll Rights Reserved.";
-"org.orin.inputmethod.McBopomofoAFM.Bopomofo" = "McBopomofo AFM";
-"org.orin.inputmethod.McBopomofoAFM.PlainBopomofo" = "Plain Bopomofo AFM";
+CFBundleName = "Smai";
+CFBundleDisplayName = "Smai";
+NSHumanReadableCopyright = "Copyright © 2011-2026 Mengjuei Hsieh, Orin et al.\nAll Rights Reserved.";
+"org.orin.inputmethod.Smai.Bopomofo" = "Smai Bopomofo";
+"org.orin.inputmethod.Smai.PlainBopomofo" = "Smai Plain Bopomofo";
 

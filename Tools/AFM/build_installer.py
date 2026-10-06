@@ -24,14 +24,14 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 # Expected identity values from Source/McBopomofo-Info.plist
-EXPECTED_BUNDLE_ID = "org.orin.inputmethod.McBopomofoAFM"
-EXPECTED_PKG_IDENTIFIER = "org.orin.inputmethod.McBopomofoAFM.pkg"
-EXPECTED_PKG_VERSION = "0.1.9"
+EXPECTED_BUNDLE_ID = "org.orin.inputmethod.Smai"
+EXPECTED_PKG_IDENTIFIER = "org.orin.inputmethod.Smai.pkg"
+EXPECTED_PKG_VERSION = "1.0.0"
 EXPECTED_INSTALL_LOCATION = "/Library/Input Methods"
 
 # Default paths
-DEFAULT_SOURCE_APP = REPO_ROOT / ".build" / "afm-assist-queue" / "McBopomofoAFM.app"
-DEFAULT_OUTPUT_PKG = REPO_ROOT / ".build" / "afm-assist-queue" / "McBopomofoAFM.pkg"
+DEFAULT_SOURCE_APP = REPO_ROOT / ".build" / "afm-assist-queue" / "Smai.app"
+DEFAULT_OUTPUT_PKG = REPO_ROOT / ".build" / "afm-assist-queue" / "Smai.pkg"
 
 
 def preflight_identity(source_app: Path) -> None:
@@ -314,7 +314,7 @@ def main() -> None:
         base = Path(tmp_dir)
         staging_root = base / "payload"
         staging_root.mkdir()
-        app_in_staging = staging_root / "McBopomofoAFM.app"
+        app_in_staging = staging_root / source_app.name
 
         # Copy app to staging
         copy_app(source_app, app_in_staging)
