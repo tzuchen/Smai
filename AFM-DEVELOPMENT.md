@@ -94,27 +94,25 @@ The AFM assist layer is now integrated into the native input method via `Source/
 
 ### Behavior and Constraints
 
-- **Trigger**: Only triggers on normal Bopomofo completed syllables at composition end.
-- **Exclusions**: Does not trigger for `plainBopomofo`, punctuation, macros, or mid-composition cursor movements.
-- **Candidate Scope**: Operates on per-node eligible same-reading variants (first 16 candidates), not full sentence N-best.
+- **Architecture**: Whole-sentence neural semantic correction (dual-engine: Spark Qwen 27B primary on LAN with 0-thinking mode, falling back to on-device Apple Foundation Model ~3B).
+- **Trigger**: Triggers on completed composition buffer (guarded against in-flight Bopomofo syllable composition via `containsBopomofoOrTone`).
 - **Timing**:
-    - 200 ms debounce.
-    - 800 ms request/resource timeout.
-- **Flow**:
-    1. Immediate baseline candidate selection.
-    2. Async AFM request for uncommitted marked text only.
-    3. Stale identity/token/client guards and cancellation checks prevent race conditions.
+    - 350 ms debounce for continuous typing.
+    - 0 ms immediate trigger on punctuation marks (`，`, `。`, `？`, `！`, etc.).
+    - 1500 ms request/resource timeout.
+- **Visual Feedback**:
+    - In-flight request: composing buffer turns Indigo.
+    - Correction applied: multi-range highlighting with Yellow background and Orange text with thick underline.
 - **Safety**:
-    - Never rewrites submitted text.
-    - Does not learn AI choices into the user model.
-    - Manual user overrides are exempt from AFM intervention.
-    - AFM failure silently falls back to the baseline candidate.
+    - Never rewrites submitted text (Enter commits immediately).
+    - Operates per sentence without accumulating stale conversation context.
+    - Silent fallback to baseline composing buffer upon network or timeout issues.
 
 ### Source Modifications
 
-- `Source/AFMAssist.swift`: Implements the local client and request gate.
-- `Source/KeyHandler.h` / `Source/KeyHandler.mm`: Exposes AFM candidate state building and application.
-- `Source/InputMethodController.swift`: Handles menu item toggling and preference synchronization.
+- `Source/AFMAssist.swift`: Implements whole-sentence neural correction client (Spark Qwen 27B + AFM fallback), request gate, and response sanitizer.
+- `Source/InputState.swift`: Implements in-flight Indigo color and multi-range Yellow/Orange highlight styling.
+- `Source/InputMethodController.swift`: Integrates whole-sentence scheduling, Bopomofo syllable composition protection, and visual state dispatching.
 
 ## Xcode Build Status
 
