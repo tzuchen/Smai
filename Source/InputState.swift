@@ -324,19 +324,55 @@ class InputState: NSObject {
     @objc(InputStateInputting)
     class Inputting: NotEmpty {
         @objc var tooltip: String = ""
+        @objc var afmPendingRange: NSRange = NSMakeRange(NSNotFound, 0)
+        @objc var afmHighlightedRange: NSRange = NSMakeRange(NSNotFound, 0)
+        @objc var afmHighlightedRanges: [NSValue] = []
 
         @objc override init(composingBuffer: String, cursorIndex: UInt) {
             super.init(composingBuffer: composingBuffer, cursorIndex: cursorIndex)
         }
 
         @objc var attributedString: NSAttributedString {
-            let attributedSting = NSAttributedString(
-                string: composingBuffer,
-                attributes: [
+            let attrStr = NSMutableAttributedString(string: composingBuffer)
+            let fullRange = NSRange(location: 0, length: (composingBuffer as NSString).length)
+            attrStr.setAttributes(
+                [
                     .underlineStyle: NSUnderlineStyle.single.rawValue,
                     .markedClauseSegment: 0,
-                ])
-            return attributedSting
+                ], range: fullRange)
+
+            if afmPendingRange.location != NSNotFound && afmPendingRange.length > 0 {
+                let range = NSIntersectionRange(afmPendingRange, fullRange)
+                if range.length > 0 {
+                    attrStr.addAttributes(
+                        [
+                            .foregroundColor: NSColor.systemIndigo,
+                            .underlineColor: NSColor.systemIndigo,
+                            .underlineStyle: NSUnderlineStyle.thick.rawValue,
+                        ], range: range)
+                }
+            }
+
+            var rangesToHighlight: [NSRange] = []
+            if !afmHighlightedRanges.isEmpty {
+                rangesToHighlight = afmHighlightedRanges.map { $0.rangeValue }
+            } else if afmHighlightedRange.location != NSNotFound && afmHighlightedRange.length > 0 {
+                rangesToHighlight = [afmHighlightedRange]
+            }
+
+            for hRange in rangesToHighlight {
+                let range = NSIntersectionRange(hRange, fullRange)
+                if range.length > 0 {
+                    attrStr.addAttributes(
+                        [
+                            .backgroundColor: NSColor.systemYellow.withAlphaComponent(0.35),
+                            .foregroundColor: NSColor.systemOrange,
+                            .underlineColor: NSColor.systemOrange,
+                            .underlineStyle: NSUnderlineStyle.thick.rawValue,
+                        ], range: range)
+                }
+            }
+            return attrStr
         }
 
         override var description: String {

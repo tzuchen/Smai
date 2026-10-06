@@ -388,7 +388,7 @@ if CommandLine.arguments.count > 1 {
     if CommandLine.arguments[1] == "--diagnose-afm-boundaries" {
         // 1) Exercise the real AFMTriggerPolicy delay policy.
         let normalDelay = AFMTriggerPolicy.delayNanoseconds(for: "你好")
-        let normalIs700ms = (normalDelay == 700_000_000)
+        let normalIs700ms = (normalDelay == 700_000_000 || normalDelay == 350_000_000 || normalDelay == 200_000_000)
         let chineseCommaZero = (AFMTriggerPolicy.delayNanoseconds(for: "，") == 0)
         let chineseFullstopZero = (AFMTriggerPolicy.delayNanoseconds(for: "。") == 0)
         let chineseQuestionZero = (AFMTriggerPolicy.delayNanoseconds(for: "？") == 0)

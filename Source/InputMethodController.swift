@@ -43,13 +43,13 @@ private let kMinKeyLabelSize: CGFloat = 10
 struct AFMTriggerPolicy {
     static func delayNanoseconds(for text: String) -> UInt64 {
         guard let lastChar = text.last else {
-            return 700_000_000
+            return 350_000_000
         }
         let punctuationSet: Set<Character> = ["，", "。", "！", "？", "；", "：", "、", ",", ".", "!", "?", ";", ":", " ", "\u{3000}"]
         if punctuationSet.contains(lastChar) {
             return 0
         }
-        return 700_000_000
+        return 350_000_000
     }
 }
 
@@ -146,6 +146,7 @@ class McBopomofoInputMethodController: IMKInputController {
     private let afmClient = AFMAssistClient()
     private let afmRequestGate = AFMRequestGate()
     private var afmTask: Task<Void, Never>?
+
 
     private let afmDiagnosticsMarkerPath = "/Users/Shared/McBopomofoAFM-diagnostics.enabled"
     private let afmDiagnosticsMaxEvents = 200
@@ -427,7 +428,7 @@ class McBopomofoInputMethodController: IMKInputController {
             }
         }
 
-        if event.type == .keyDown || event.type == .flagsChanged {
+        if event.type == .keyDown {
             cancelAFMRequest()
         }
 
@@ -499,6 +500,17 @@ class McBopomofoInputMethodController: IMKInputController {
         }
 
         if event.type == .keyDown {
+            let chars = event.characters ?? ""
+            let charsNoMod = event.charactersIgnoringModifiers ?? ""
+            let flagsStr = [
+                event.modifierFlags.contains(.shift) ? "shift" : nil,
+                event.modifierFlags.contains(.control) ? "ctrl" : nil,
+                event.modifierFlags.contains(.option) ? "opt" : nil,
+                event.modifierFlags.contains(.command) ? "cmd" : nil,
+                event.modifierFlags.contains(.capsLock) ? "caps" : nil
+            ].compactMap { $0 }.joined(separator: "|")
+            AFMDevLogger.shared.log("KEY DOWN keyCode=\(event.keyCode), chars='\(chars)', charsNoMod='\(charsNoMod)', flags=[\(flagsStr)]")
+
             if event.modifierFlags.contains(.capsLock) {
                 Self.capsLockSwitch.observeNativeCapsOn()
             }
@@ -856,6 +868,40 @@ extension McBopomofoInputMethodController {
         afmRequestGate.invalidate()
     }
 
+    private func findChangedRange(old: NSString, new: NSString) -> NSRange {
+        let oldLen = old.length
+        let newLen = new.length
+        var prefixLen = 0
+        while prefixLen < oldLen && prefixLen < newLen && old.character(at: prefixLen) == new.character(at: prefixLen) {
+            prefixLen += 1
+        }
+        var suffixLen = 0
+        while suffixLen < (oldLen - prefixLen) && suffixLen < (newLen - prefixLen)
+                && old.character(at: oldLen - 1 - suffixLen) == new.character(at: newLen - 1 - suffixLen) {
+            suffixLen += 1
+        }
+        let changedLen = newLen - prefixLen - suffixLen
+        if changedLen > 0 {
+            return NSRange(location: prefixLen, length: changedLen)
+        }
+        return NSRange(location: 0, length: newLen)
+    }
+
+    private static func containsBopomofoOrTone(_ text: String) -> Bool {
+        for scalar in text.unicodeScalars {
+            let v = scalar.value
+            // Bopomofo block: U+3105 to U+312F
+            // Bopomofo Extended: U+31A0 to U+31BF
+            // Tone marks: U+02CA, U+02C7, U+02CB, U+02D9, U+02C9
+            if (v >= 0x3105 && v <= 0x312F) ||
+               (v >= 0x31A0 && v <= 0x31BF) ||
+               v == 0x02CA || v == 0x02C7 || v == 0x02CB || v == 0x02D9 || v == 0x02C9 {
+                return true
+            }
+        }
+        return false
+    }
+
     private func scheduleAFMRequest(
         inputting: InputState.Inputting, client: Any?
     ) {
@@ -866,20 +912,25 @@ extension McBopomofoInputMethodController {
             return
         }
 
-        guard let afmState = keyHandler.buildAFMCandidateState() as? InputState.ChoosingCandidate,
-              !afmState.candidates.isEmpty
-        else {
-            AFMAssistDiagnostics.shared.record(.ineligible)
+        let sentence = inputting.composingBuffer
+        let sentenceLen = (sentence as NSString).length
+        guard sentenceLen >= 2 else {
+            return
+        }
+
+        // If composing buffer contains uncompleted Bopomofo/tone symbols (e.g. ㄋ, ㄧ, ㄝ),
+        // do not schedule an LLM request until the character has been fully assembled.
+        if Self.containsBopomofoOrTone(sentence) {
             return
         }
 
         let capturedInputting = inputting
         let capturedClient = client
         let token = afmRequestGate.token()
-        let context = String(capturedInputting.composingBuffer.suffix(256))
-        let candidateValues = afmState.candidates.map { $0.value }
         let afmClient = self.afmClient
-        let delay = AFMTriggerPolicy.delayNanoseconds(for: capturedInputting.composingBuffer)
+        let delay = AFMTriggerPolicy.delayNanoseconds(for: sentence)
+
+        AFMDevLogger.shared.log("AFM WHOLE-SENTENCE SCHEDULED delay=\(delay/1_000_000)ms, sentence='\(sentence)'")
 
         afmTask = Task { @MainActor [weak self] in
             if delay > 0 {
@@ -894,8 +945,18 @@ extension McBopomofoInputMethodController {
                 AFMAssistDiagnostics.shared.record(.debounced_cancelled)
                 return
             }
-            let selectedIndex = await afmClient.select(
-                context: context, candidates: candidateValues)
+
+            // Visual feedback: While AFM is running, turn the entire composing buffer Indigo!
+            capturedInputting.afmPendingRange = NSRange(location: 0, length: sentenceLen)
+            capturedClient.setMarkedText(
+                capturedInputting.attributedString,
+                selectionRange: NSMakeRange(Int(capturedInputting.cursorIndex), 0),
+                replacementRange: NSMakeRange(NSNotFound, NSNotFound)
+            )
+            AFMDevLogger.shared.log("AFM IN FLIGHT (COLOR CHANGED to INDIGO) sentence='\(sentence)'")
+
+            let correctedSentence = await afmClient.correctSentence(sentence: sentence)
+
             guard !Task.isCancelled,
                   let self = self,
                   self.afmRequestGate.isCurrent(token),
@@ -903,23 +964,92 @@ extension McBopomofoInputMethodController {
                   self.state === capturedInputting,
                   (self.currentClient as AnyObject?) === (capturedClient as AnyObject)
             else {
+                if self?.state === capturedInputting {
+                    capturedInputting.afmPendingRange = NSMakeRange(NSNotFound, 0)
+                    capturedClient.setMarkedText(
+                        capturedInputting.attributedString,
+                        selectionRange: NSMakeRange(Int(capturedInputting.cursorIndex), 0),
+                        replacementRange: NSMakeRange(NSNotFound, NSNotFound)
+                    )
+                }
                 AFMAssistDiagnostics.shared.record(.stale)
+                AFMDevLogger.shared.log("AFM STALE or CANCELLED token=\(token)")
                 return
             }
-            guard let selectedIndex = selectedIndex,
-                  selectedIndex >= 0,
-                  selectedIndex < afmState.candidates.count
+
+            // Clear pending range
+            capturedInputting.afmPendingRange = NSMakeRange(NSNotFound, 0)
+
+            guard let correctedSentence = correctedSentence,
+                  correctedSentence != sentence
             else {
-                return
-            }
-            let candidate = afmState.candidates[selectedIndex]
-            guard let newState = self.keyHandler.applyAFMCandidate(
-                reading: candidate.reading, value: candidate.value
-            ) as? InputState.Inputting else {
+                // No correction made or unchanged
+                capturedClient.setMarkedText(
+                    capturedInputting.attributedString,
+                    selectionRange: NSMakeRange(Int(capturedInputting.cursorIndex), 0),
+                    replacementRange: NSMakeRange(NSNotFound, NSNotFound)
+                )
                 AFMAssistDiagnostics.shared.record(.unchanged_or_rejected)
+                AFMDevLogger.shared.log("AFM WHOLE-SENTENCE UNCHANGED: '\(sentence)'")
                 return
             }
+
+            let origNS = sentence as NSString
+            let corrNS = correctedSentence as NSString
+            guard origNS.length == corrNS.length else {
+                capturedClient.setMarkedText(
+                    capturedInputting.attributedString,
+                    selectionRange: NSMakeRange(Int(capturedInputting.cursorIndex), 0),
+                    replacementRange: NSMakeRange(NSNotFound, NSNotFound)
+                )
+                AFMDevLogger.shared.log("AFM WHOLE-SENTENCE LENGTH MISMATCH: orig='\(sentence)', corr='\(correctedSentence)'")
+                return
+            }
+
+            // Find all changed ranges
+            var changedRanges: [NSRange] = []
+            var currentStart: Int? = nil
+
+            for i in 0..<origNS.length {
+                let origChar = origNS.character(at: i)
+                let corrChar = corrNS.character(at: i)
+                if origChar != corrChar {
+                    if currentStart == nil {
+                        currentStart = i
+                    }
+                } else {
+                    if let start = currentStart {
+                        changedRanges.append(NSRange(location: start, length: i - start))
+                        currentStart = nil
+                    }
+                }
+            }
+            if let start = currentStart {
+                changedRanges.append(NSRange(location: start, length: origNS.length - start))
+            }
+
+            guard !changedRanges.isEmpty else {
+                capturedClient.setMarkedText(
+                    capturedInputting.attributedString,
+                    selectionRange: NSMakeRange(Int(capturedInputting.cursorIndex), 0),
+                    replacementRange: NSMakeRange(NSNotFound, NSNotFound)
+                )
+                return
+            }
+
+            // Create new inputting state with corrected text and highlights!
+            let newState = InputState.Inputting(
+                composingBuffer: correctedSentence,
+                cursorIndex: capturedInputting.cursorIndex
+            )
+            newState.afmHighlightedRanges = changedRanges.map { NSValue(range: $0) }
+            if let firstRange = changedRanges.first {
+                newState.afmHighlightedRange = firstRange
+            }
+
             AFMAssistDiagnostics.shared.record(.applied)
+            AFMDevLogger.shared.log("AFM WHOLE-SENTENCE APPLIED & HIGHLIGHTED: '\(sentence)' -> '\(correctedSentence)', changedRanges=\(changedRanges)")
+
             self.handle(state: newState, client: capturedClient)
         }
     }
@@ -940,6 +1070,9 @@ extension McBopomofoInputMethodController {
         if buffer.isEmpty {
             return
         }
+
+        AFMDevLogger.shared.log("COMMIT text='\(buffer)'")
+
         (client as? IMKTextInput)?.insertText(
             buffer, replacementRange: NSRange(location: NSNotFound, length: NSNotFound))
     }
