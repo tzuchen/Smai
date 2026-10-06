@@ -45,8 +45,8 @@
 @import RomanNumbers;
 @import BopomofoBraille;
 
-InputMode InputModeBopomofo = @"org.openvanilla.inputmethod.McBopomofo.Bopomofo";
-InputMode InputModePlainBopomofo = @"org.openvanilla.inputmethod.McBopomofo.PlainBopomofo";
+InputMode InputModeBopomofo = @"org.orin.inputmethod.McBopomofoAFM.Bopomofo";
+InputMode InputModePlainBopomofo = @"org.orin.inputmethod.McBopomofoAFM.PlainBopomofo";
 
 @implementation KeyHandler {
     std::shared_ptr<Formosa::Gramambular2::LanguageModel> _emptySharedPtr;
@@ -325,6 +325,56 @@ InputMode InputModePlainBopomofo = @"org.openvanilla.inputmethod.McBopomofo.Plai
     return layout;
 }
 
+- (char)_normalizeUnicodeBpmfChar:(UniChar)charCode
+{
+    if (charCode < 0x80) {
+        return (char)charCode;
+    }
+
+    bool isBpmfSymbol = (charCode >= 0x3105 && charCode <= 0x3129);
+    bool isToneMark = (charCode == 0x02CA || charCode == 0x02C7 || charCode == 0x02CB || charCode == 0x02D9 || charCode == 0x02C9);
+
+    if (!isBpmfSymbol && !isToneMark) {
+        return 0;
+    }
+
+    const Formosa::Mandarin::BopomofoKeyboardLayout *layout = _bpmfReadingBuffer->keyboardLayout();
+    if (layout == nullptr) {
+        return 0;
+    }
+
+    // Only allow exact matches for StandardLayout, ETenLayout, and IBMLayout.
+    // Return 0 for ambiguous layouts (Hsu, ETen26, HanyuPinyin) or null.
+    if (layout != Formosa::Mandarin::BopomofoKeyboardLayout::StandardLayout() &&
+        layout != Formosa::Mandarin::BopomofoKeyboardLayout::ETenLayout() &&
+        layout != Formosa::Mandarin::BopomofoKeyboardLayout::IBMLayout()) {
+        return 0;
+    }
+
+    // Handle U+02C9 (Tone 1) explicitly as ASCII space before FromComposedString
+    // since Tone1 has zero bits and results in an empty syllable.
+    if (charCode == 0x02C9) {
+        return ' ';
+    }
+
+    NSString *str = [NSString stringWithCharacters:&charCode length:1];
+    std::string utf8 = std::string(str.UTF8String);
+
+    Formosa::Mandarin::BopomofoSyllable syllable = Formosa::Mandarin::BopomofoSyllable::FromComposedString(utf8);
+
+    if (syllable.isEmpty()) {
+        return 0;
+    }
+
+    std::string keySeq = layout->keySequenceFromSyllable(syllable);
+
+    if (keySeq.length() != 1) {
+        return 0;
+    }
+
+    return keySeq[0];
+}
+
 - (BOOL)handleInput:(KeyHandlerInput *)input state:(InputState *)inState stateCallback:(void (^)(InputState *))stateCallback errorCallback:(void (^)(void))errorCallback
 {
     InputState *state = inState;
@@ -382,6 +432,20 @@ InputMode InputModePlainBopomofo = @"org.openvanilla.inputmethod.McBopomofo.Plai
     if (charCode == 8 || charCode == 13 || input.isAbsorbedArrowKey || input.isExtraChooseCandidateKey || input.isCursorForward || input.isCursorBackward) {
         // do nothing if backspace is pressed -- we ignore the key
     } else if (input.isCapsLockOn) {
+        // If there is pending composition, force commit it first to preserve user input.
+        if ([state isKindOfClass:[InputStateInputting class]] && (!_bpmfReadingBuffer->isEmpty() || _grid->length() > 0)) {
+            [self handleForceCommitWithStateCallback:stateCallback];
+        }
+
+        // Normalize single Unicode BPMF characters to keyboard layout keys
+        UniChar normalizedCharCode = charCode;
+        if (charCode >= 0x80 && input.inputText.length == 1 && !input.isReservedKey && !input.isControlHold && !input.isCommandHold && !input.isOptionHold) {
+            char normalized = [self _normalizeUnicodeBpmfChar:charCode];
+            if (normalized != 0) {
+                normalizedCharCode = normalized;
+            }
+        }
+
         // process all possible combination, we hope.
         [self clear];
         InputStateEmpty *emptyState = [[InputStateEmpty alloc] init];
@@ -389,16 +453,30 @@ InputMode InputModePlainBopomofo = @"org.openvanilla.inputmethod.McBopomofo.Plai
 
         // first commit everything in the buffer.
         if (input.isShiftHold) {
+            // If we have a normalized BPMF key, commit it in uppercase.
+            if (normalizedCharCode != charCode) {
+                NSString *text = [NSString stringWithFormat:@"%c", (char)normalizedCharCode];
+                InputStateCommitting *committingState = [[InputStateCommitting alloc] initWithPoppedText:text.uppercaseString];
+                stateCallback(committingState);
+                stateCallback(emptyState);
+                return YES;
+            }
             return NO;
         }
 
         // if ASCII but not printable, don't use insertText:replacementRange: as many apps don't handle non-ASCII char insertions.
-        if (charCode < 0x80 && !isprint(charCode)) {
+        if (normalizedCharCode < 0x80 && !isprint(normalizedCharCode)) {
             return NO;
         }
 
         // when shift is pressed, don't do further processing, since it outputs capital letter anyway.
-        InputStateCommitting *committingState = [[InputStateCommitting alloc] initWithPoppedText:input.inputText.lowercaseString];
+        NSString *textToCommit;
+        if (normalizedCharCode != charCode) {
+            textToCommit = [NSString stringWithFormat:@"%c", (char)normalizedCharCode];
+        } else {
+            textToCommit = input.inputText.lowercaseString;
+        }
+        InputStateCommitting *committingState = [[InputStateCommitting alloc] initWithPoppedText:textToCommit];
         stateCallback(committingState);
         stateCallback(emptyState);
         return YES;
@@ -464,12 +542,22 @@ InputMode InputModePlainBopomofo = @"org.openvanilla.inputmethod.McBopomofo.Plai
     BOOL keyConsumedByReading = NO;
     BOOL skipBpmfHandling = input.isReservedKey || input.isControlHold;
 
+    // Normalize single Unicode BPMF characters to keyboard layout keys
+    UniChar normalizedCharCode = charCode;
+    if (!skipBpmfHandling && !input.isCommandHold && !input.isOptionHold && !input.isShiftHold &&
+        input.inputText.length == 1) {
+        char normalized = [self _normalizeUnicodeBpmfChar:charCode];
+        if (normalized != 0) {
+            normalizedCharCode = normalized;
+        }
+    }
+
     // MARK: Handle BPMF Keys
 
     // see if it's valid BPMF reading
-    bool isValidKey = _bpmfReadingBuffer->isValidKey((char)charCode);
+    bool isValidKey = (normalizedCharCode < 0x80) && _bpmfReadingBuffer->isValidKey((char)normalizedCharCode);
     if (!skipBpmfHandling && isValidKey) {
-        _bpmfReadingBuffer->combineKey((char)charCode);
+        _bpmfReadingBuffer->combineKey((char)normalizedCharCode);
         keyConsumedByReading = YES;
 
         // if we have a tone marker, we have to insert the reading to the
@@ -495,7 +583,7 @@ InputMode InputModePlainBopomofo = @"org.openvanilla.inputmethod.McBopomofo.Plai
             for (char k : keys) {
                 tmpBuffer.combineKey(k);
             }
-            tmpBuffer.combineKey((char)charCode);
+            tmpBuffer.combineKey((char)normalizedCharCode);
             std::string newReading = tmpBuffer.syllable().composedString();
             if (_languageModel->hasUnigrams(newReading)) {
                 _bpmfReadingBuffer->clear();
@@ -513,7 +601,8 @@ InputMode InputModePlainBopomofo = @"org.openvanilla.inputmethod.McBopomofo.Plai
 
     // see if we have composition if Enter/Space is hit and buffer is not empty
     // this is bit-OR'ed so that the tone marker key is also taken into account
-    composeReading |= (!_bpmfReadingBuffer->isEmpty() && (charCode == 32 || charCode == 13));
+    // Note: Use normalizedCharCode so that U+02C9 (normalized to space) completes the reading
+    composeReading |= (!_bpmfReadingBuffer->isEmpty() && (normalizedCharCode == 32 || normalizedCharCode == 13));
     if (composeReading) {
         // combine the reading
         std::string reading = _bpmfReadingBuffer->syllable().composedString();
@@ -601,6 +690,22 @@ InputMode InputModePlainBopomofo = @"org.openvanilla.inputmethod.McBopomofo.Plai
     if (_bpmfReadingBuffer->isEmpty() &&
         [state isKindOfClass:[InputStateNotEmpty class]] && (input.isExtraChooseCandidateKey || charCode == 32 || (input.useVerticalMode && (input.isVerticalModeOnlyChooseCandidateKey)))) {
         if (charCode == 32) {
+            // AFM: when enabled, in Bopomofo mode, with cursor at end, no partial
+            // reading, and plain space (no modifiers), insert space reading into
+            // grid instead of committing, so AFM can update the pending sentence.
+            if (Preferences.afmAssistEnabled &&
+                [_inputMode isEqualToString:InputModeBopomofo] &&
+                _grid->cursor() >= _grid->length() &&
+                _bpmfReadingBuffer->isEmpty() &&
+                !input.isShiftHold && !input.isCommandHold && !input.isOptionHold && !input.isControlHold &&
+                [state isKindOfClass:[InputStateInputting class]] &&
+                _languageModel->hasUnigrams(" ")) {
+                _grid->insertReading(" ");
+                [self _walk];
+                InputStateInputting *inputting = (InputStateInputting *)[self buildInputtingState];
+                stateCallback(inputting);
+                return YES;
+            }
             // if the spacebar is NOT set to be a selection key
             if (input.isShiftHold || !Preferences.chooseCandidateUsingSpace) {
                 if (_grid->cursor() >= _grid->length()) {
@@ -752,6 +857,14 @@ InputMode InputModePlainBopomofo = @"org.openvanilla.inputmethod.McBopomofo.Plai
         InputStateSelectingFeature *selecting = [[InputStateSelectingFeature alloc] init];
         stateCallback(selecting);
         return YES;
+    }
+
+    // Unrelated non-ASCII characters must not reach the (char)charCode casts
+    // in the punctuation / customPunctuation / uppercase-letter paths below.
+    // Recognized Unicode BPMF characters are already consumed by the normal
+    // reading flow above.
+    if (charCode >= 0x80) {
+        return NO;
     }
 
     // MARK: Punctuation list
@@ -2749,6 +2862,150 @@ InputMode InputModePlainBopomofo = @"org.openvanilla.inputmethod.McBopomofo.Plai
     InputStateInputting *updatedState = [[InputStateInputting alloc] initWithComposingBuffer:state.composingBuffer cursorIndex:state.cursorIndex];
     updatedState.tooltip = NSLocalizedString(@"Cannot add new phrases when Bopomofo annotation is on", @"");
     return updatedState;
+}
+
+- (nullable InputState *)buildAFMCandidateState
+{
+    if (![_inputMode isEqualToString:InputModeBopomofo]) {
+        return nil;
+    }
+    if (!_bpmfReadingBuffer->isEmpty()) {
+        return nil;
+    }
+    if (_grid->length() == 0) {
+        return nil;
+    }
+    if (_grid->cursor() != _grid->length()) {
+        return nil;
+    }
+
+    // Find the target cursor position: the end of the last "real" reading,
+    // skipping trailing punctuation and space readings.
+    std::vector<std::string> readings = _grid->readings();
+    size_t targetCursor = _grid->length();
+    for (size_t i = readings.size(); i > 0; --i) {
+        const std::string& r = readings[i - 1];
+        if (r == " " || r.rfind("_punctuation_", 0) == 0 || r.rfind("_half_punctuation_", 0) == 0 || r.rfind("_ctrl_punctuation_", 0) == 0) {
+            targetCursor = i - 1;
+        } else {
+            break;
+        }
+    }
+
+    // If no trailing punctuation/space was found, targetCursor remains at the end.
+    // We need at least one real reading before the target.
+    if (targetCursor == 0) {
+        return nil;
+    }
+
+    size_t originalCursor = _grid->cursor();
+    InputStateInputting *fullInputting = (InputStateInputting *)[self buildInputtingState];
+    if (targetCursor < originalCursor && Preferences.selectPhraseAfterCursorAsCandidate) {
+        --targetCursor;
+    }
+    _grid->setCursor(targetCursor);
+
+    // RAII-style cleanup: restore cursor on every return path.
+    struct CursorRestorer {
+        Formosa::Gramambular2::ReadingGrid *grid;
+        size_t original;
+        ~CursorRestorer() { grid->setCursor(original); }
+    } restorer{ _grid, originalCursor };
+
+    size_t accumulatedCursor = 0;
+    auto nodeIter = _latestWalk.findNodeAt(self.actualCandidateCursorIndex, &accumulatedCursor);
+    if (nodeIter == _latestWalk.nodes.cend()) {
+        return nil;
+    }
+    Formosa::Gramambular2::ReadingGrid::NodePtr currentNode = *nodeIter;
+    if (currentNode == nullptr || currentNode->isOverridden()) {
+        return nil;
+    }
+
+    NSString *currentReading = @(currentNode->reading().c_str());
+
+    InputStateInputting *inputting = (InputStateInputting *)[self buildInputtingState];
+    InputStateChoosingCandidate *candidateState = [self _buildCandidateStateFromInputtingState:inputting useVerticalMode:NO];
+    NSArray<InputStateCandidate *> *allCandidates = candidateState.candidates;
+
+    NSMutableArray<InputStateCandidate *> *eligibleCandidates = [[NSMutableArray alloc] init];
+    for (InputStateCandidate *candidate in allCandidates) {
+        if (![candidate.reading isEqualToString:currentReading]) {
+            continue;
+        }
+        if ([candidate.reading hasPrefix:@"_"]) {
+            continue;
+        }
+        if (candidate.rawValue.length > 0 && ![candidate.rawValue isEqualToString:candidate.value]) {
+            continue;
+        }
+        [eligibleCandidates addObject:candidate];
+    }
+
+    if (eligibleCandidates.count < 2) {
+        return nil;
+    }
+
+    NSArray<InputStateCandidate *> *filteredCandidates = [eligibleCandidates subarrayWithRange:NSMakeRange(0, MIN(eligibleCandidates.count, 16))];
+    InputStateChoosingCandidate *newState = [[InputStateChoosingCandidate alloc] initWithComposingBuffer:fullInputting.composingBuffer cursorIndex:fullInputting.cursorIndex candidates:filteredCandidates useVerticalMode:NO];
+    newState.originalCursorIndex = targetCursor;
+    return newState;
+}
+
+- (nullable InputState *)applyAFMCandidateWithReading:(NSString *)reading value:(NSString *)value
+{
+    // Revalidate the current node (mode, cursor, no partial syllable,
+    // !isOverridden) and obtain the eligible candidate list.
+    InputState *candidateState = [self buildAFMCandidateState];
+    if (candidateState == nil) {
+        return nil;
+    }
+
+    // Match the exact requested reading/value within the eligible candidate
+    // list; reject if the current value is unchanged.
+    NSArray<InputStateCandidate *> *candidates = ((InputStateChoosingCandidate *)candidateState).candidates;
+    BOOL matched = NO;
+    for (InputStateCandidate *candidate in candidates) {
+        if ([candidate.reading isEqualToString:reading] && [candidate.value isEqualToString:value]) {
+            matched = YES;
+            break;
+        }
+    }
+    if (!matched) {
+        return nil;
+    }
+
+    size_t targetCursor = ((InputStateChoosingCandidate *)candidateState).originalCursorIndex;
+    size_t originalCursor = _grid->cursor();
+    _grid->setCursor(targetCursor);
+
+    struct CursorRestorer {
+        Formosa::Gramambular2::ReadingGrid *grid;
+        size_t original;
+        ~CursorRestorer() { grid->setCursor(original); }
+    } restorer{ _grid, originalCursor };
+
+    size_t accumulatedCursor = 0;
+    auto nodeIter = _latestWalk.findNodeAt(self.actualCandidateCursorIndex, &accumulatedCursor);
+    if (nodeIter == _latestWalk.nodes.cend()) {
+        return nil;
+    }
+    Formosa::Gramambular2::ReadingGrid::NodePtr currentNode = *nodeIter;
+    if (currentNode->currentUnigram().value() == value.UTF8String) {
+        return nil;
+    }
+
+    size_t actualCursor = self.actualCandidateCursorIndex;
+    Formosa::Gramambular2::ReadingGrid::Candidate candidate(reading.UTF8String, value.UTF8String);
+    if (!_grid->overrideCandidate(actualCursor, candidate)) {
+        return nil;
+    }
+
+    [self _walk];
+
+    _grid->setCursor(originalCursor);
+
+    return [self buildInputtingState];
 }
 
 @end

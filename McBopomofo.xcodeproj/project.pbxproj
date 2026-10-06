@@ -100,6 +100,8 @@
 		D4F0BBE1279AF8B30071253C /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F0BBE0279AF8B30071253C /* AppDelegate.swift */; };
 		D4F0BBE4279B08900071253C /* BundleTranslocate.m in Sources */ = {isa = PBXBuildFile; fileRef = D4F0BBE3279B08900071253C /* BundleTranslocate.m */; };
 		D4F0BBE7279B14C20071253C /* Credits.rtf in Resources */ = {isa = PBXBuildFile; fileRef = D4F0BBE9279B14C20071253C /* Credits.rtf */; };
+		D4AF00010000000000000001 /* AFMAssist.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4AF00010000000000000002 /* AFMAssist.swift */; };
+		D4AF00010000000000000003 /* AFMAssistTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4AF00010000000000000004 /* AFMAssistTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -258,6 +260,8 @@
 		D4F0BBE8279B14C20071253C /* Base */ = {isa = PBXFileReference; lastKnownFileType = text.rtf; name = Base; path = Base.lproj/Credits.rtf; sourceTree = "<group>"; };
 		D4F0BBEA279B14CB0071253C /* en */ = {isa = PBXFileReference; lastKnownFileType = text.rtf; name = en; path = en.lproj/Credits.rtf; sourceTree = "<group>"; };
 		D4F0BBEB279B14D00071253C /* zh-Hant */ = {isa = PBXFileReference; lastKnownFileType = text.rtf; name = "zh-Hant"; path = "zh-Hant.lproj/Credits.rtf"; sourceTree = "<group>"; };
+		D4AF00010000000000000002 /* AFMAssist.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AFMAssist.swift; sourceTree = "<group>"; };
+		D4AF00010000000000000004 /* AFMAssistTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AFMAssistTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -349,6 +353,7 @@
 				D47B92BF27972AC800458394 /* main.swift */,
 				6A0D4EF615FC0DA600ABF4B3 /* McBopomofo-Prefix.pch */,
 				D427A9BF25ED28CC005D43E0 /* McBopomofo-Bridging-Header.h */,
+				D4AF00010000000000000002 /* AFMAssist.swift */,
 			);
 			path = Source;
 			sourceTree = "<group>";
@@ -525,6 +530,7 @@
 				D4EE67572B39685F00F062DE /* DictionaryServiceTests.swift */,
 				D4C2A9862B4309D700113711 /* UTF8HelperTest.mm */,
 				D4C2A9852B4309D600113711 /* McBopomofoTests-Bridging-Header.h */,
+				D4AF00010000000000000004 /* AFMAssistTests.swift */,
 			);
 			path = McBopomofoTests;
 			sourceTree = "<group>";
@@ -764,6 +770,7 @@
 				6ADF5B192BA513E000577D98 /* AssociatedPhrasesV2.cpp in Sources */,
 				6ADF5B1B2BA513E000577D98 /* UTF8Helper.cpp in Sources */,
 				D41355D8278D74B5005E5CBD /* LanguageModelManager.mm in Sources */,
+				D4AF00010000000000000001 /* AFMAssist.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -790,6 +797,7 @@
 				D449AD612B39506D000C5812 /* ServiceProviderTests.swift in Sources */,
 				D485D3C02796CE3200657FF3 /* VersionUpdateTests.swift in Sources */,
 				D4EE67582B39685F00F062DE /* DictionaryServiceTests.swift in Sources */,
+				D4AF00010000000000000003 /* AFMAssistTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1099,7 +1107,7 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				ONLY_ACTIVE_ARCH = YES;
-				PRODUCT_BUNDLE_IDENTIFIER = org.openvanilla.inputmethod.McBopomofo;
+				PRODUCT_BUNDLE_IDENTIFIER = org.orin.inputmethod.McBopomofoAFM;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
 				SWIFT_OBJC_BRIDGING_HEADER = "Source/McBopomofo-Bridging-Header.h";
@@ -1153,7 +1161,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				PRODUCT_BUNDLE_IDENTIFIER = org.openvanilla.inputmethod.McBopomofo;
+				PRODUCT_BUNDLE_IDENTIFIER = org.orin.inputmethod.McBopomofoAFM;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
 				SWIFT_OBJC_BRIDGING_HEADER = "Source/McBopomofo-Bridging-Header.h";

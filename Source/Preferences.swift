@@ -73,6 +73,7 @@ private let kAddPhraseHookPath = "AddPhraseHookPath"
 
 private let kSelectCandidateWithNumericKeypad = "SelectCandidateWithNumericKeypad"
 private let kBig5InputEnabledKey = "Big5InputEnabled"
+private let kAFMAssistEnabledKey = "AFMAssistEnabled"
 
 // Need to be populated to true by default upon first start, so the key is not private.
 let kBeepUponInputErrorKey = "BeepUponInputError"
@@ -244,10 +245,48 @@ class Preferences: NSObject {
             kRepeatedPunctuationToSelectCandidateEnabledKey,
             kUseCustomUserPhraseLocation,
             kCustomUserPhraseLocation,
+            kAFMAssistEnabledKey,
+            kMoveCursorAfterSelectingCandidateKey,
+            kSelectCandidateWithNumericKeypad,
+            kBig5InputEnabledKey,
         ]
     }
 
+    private static func importUpstreamSettingsIfNeeded() {
+        guard Bundle.main.bundleIdentifier == "org.orin.inputmethod.McBopomofoAFM" else {
+            return
+        }
+        
+        let markerKey = "AFMImportedUpstreamSettings"
+        let defaults = UserDefaults.standard
+        guard let bundleID = Bundle.main.bundleIdentifier else {
+            return
+        }
+        
+        let destinationDomain = defaults.persistentDomain(forName: bundleID) ?? [:]
+
+        if destinationDomain[markerKey] as? Bool == true {
+            return
+        }
+        
+        let originalDomainName = "org.openvanilla.inputmethod.McBopomofo"
+        let originalDomain = defaults.persistentDomain(forName: originalDomainName)
+        
+        var updatedDestination = destinationDomain
+        if let originalDomain {
+            for key in allKeys where key != kAFMAssistEnabledKey {
+                if destinationDomain[key] == nil, let value = originalDomain[key] {
+                    updatedDestination[key] = value
+                }
+            }
+        }
+        
+        updatedDestination[markerKey] = true
+        defaults.setPersistentDomain(updatedDestination, forName: bundleID)
+    }
+    
     @objc static func populateDefaults() {
+        importUpstreamSettingsIfNeeded()
         Preferences.keyboardLayout = Preferences.keyboardLayout
         Preferences.basisKeyboardLayout = Preferences.basisKeyboardLayout
         Preferences.functionKeyboardLayout = Preferences.functionKeyboardLayout
@@ -593,6 +632,11 @@ extension Preferences {
 extension Preferences {
     @UserDefault(key: kBig5InputEnabledKey, defaultValue: true)
     @objc static var big5InputEnabled: Bool
+}
+
+extension Preferences {
+    @UserDefault(key: kAFMAssistEnabledKey, defaultValue: false)
+    @objc static var afmAssistEnabled: Bool
 }
 
 extension Preferences {

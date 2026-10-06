@@ -1,6 +1,6 @@
-CFBundleName = "McBopomofo";
-CFBundleDisplayName = "McBopomofo";
+CFBundleName = "McBopomofo AFM";
+CFBundleDisplayName = "McBopomofo AFM";
 NSHumanReadableCopyright = "Copyright © 2011-2026 Mengjuei Hsieh et al.\nAll Rights Reserved.";
-"org.openvanilla.inputmethod.McBopomofo.Bopomofo" = "Bopomofo";
-"org.openvanilla.inputmethod.McBopomofo.PlainBopomofo" = "Plain Bopomofo";
+"org.orin.inputmethod.McBopomofoAFM.Bopomofo" = "McBopomofo AFM";
+"org.orin.inputmethod.McBopomofoAFM.PlainBopomofo" = "Plain Bopomofo AFM";
 

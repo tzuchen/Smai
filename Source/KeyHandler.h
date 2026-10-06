@@ -88,6 +88,9 @@ extern InputMode InputModePlainBopomofo;
                                                     useVerticalMode:(BOOL)useVerticalMode;
 - (nullable InputState *)buildAssociatedPhraseStateWithParams:(BuildAssociatedPhraseParams *)params;
 
+- (nullable InputState *)buildAFMCandidateState NS_SWIFT_NAME(buildAFMCandidateState());
+- (nullable InputState *)applyAFMCandidateWithReading:(NSString *)reading value:(NSString *)value NS_SWIFT_NAME(applyAFMCandidate(reading:value:));
+
 - (size_t)computeActualCursorIndex:(size_t)cursor;
 
 - (NSArray<NSString *> *)collectUserFileIssues;
