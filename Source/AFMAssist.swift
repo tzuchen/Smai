@@ -365,7 +365,7 @@ internal struct AFMAssistClient: Sendable {
 
             var request = URLRequest(url: url)
             request.httpMethod = "POST"
-            let isPromptOptimization = (sentence.hasPrefix(">>") || sentence.hasPrefix("》》")) && Preferences.afmPromptOptimizerEnabled
+            let isPromptOptimization = (sentence.hasPrefix(">>") || sentence.hasPrefix("》》") || sentence.hasPrefix("。。")) && Preferences.afmPromptOptimizerEnabled
             // Use 8.0s timeout for prompt optimization (generates ~100 tokens), 1.2s for normal sentence correction
             request.timeoutInterval = isPromptOptimization ? 8.0 : 1.2
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -378,10 +378,10 @@ internal struct AFMAssistClient: Sendable {
             if isPromptOptimization {
                 allowsLengthChange = true
                 var cleanDemand = sentence
-                if cleanDemand.hasPrefix(">>") || cleanDemand.hasPrefix("》》") {
+                if cleanDemand.hasPrefix(">>") || cleanDemand.hasPrefix("》》") || cleanDemand.hasPrefix("。。") {
                     cleanDemand = String(cleanDemand.dropFirst(2))
                 }
-                if cleanDemand.hasSuffix(">>") || cleanDemand.hasSuffix("》》") {
+                if cleanDemand.hasSuffix(">>") || cleanDemand.hasSuffix("》》") || cleanDemand.hasSuffix("。。") {
                     cleanDemand = String(cleanDemand.dropLast(2))
                 }
                 cleanDemand = cleanDemand.trimmingCharacters(in: .whitespacesAndNewlines)

@@ -42,8 +42,8 @@ private let kMinKeyLabelSize: CGFloat = 10
 
 struct AFMTriggerPolicy {
     static func delayNanoseconds(for text: String) -> UInt64 {
-        if text.hasPrefix(">>") || text.hasPrefix("》》") {
-            if text.hasSuffix(">>") || text.hasSuffix("》》") {
+        if text.hasPrefix(">>") || text.hasPrefix("》》") || text.hasPrefix("。。") {
+            if text.hasSuffix(">>") || text.hasSuffix("》》") || text.hasSuffix("。。") {
                 return 0
             }
             if let lastChar = text.last {
@@ -994,7 +994,7 @@ extension McBopomofoInputMethodController {
             return
         }
 
-        let sentence = inputting.composingBuffer
+        var sentence = inputting.composingBuffer
         let sentenceLen = (sentence as NSString).length
         guard sentenceLen >= 2 else {
             return
@@ -1006,13 +1006,37 @@ extension McBopomofoInputMethodController {
             return
         }
 
+        // Check if preceding text in the client document already has >>, 》》, or 。。
+        let clientPrecedingRange: NSRange? = {
+            guard Preferences.afmPromptOptimizerEnabled else { return nil }
+            if sentence.hasPrefix(">>") || sentence.hasPrefix("》》") || sentence.hasPrefix("。。") {
+                return nil
+            }
+            let marked = client.markedRange()
+            let sel = client.selectedRange()
+            let startLoc = (marked.location != NSNotFound) ? marked.location : sel.location
+            guard startLoc != NSNotFound && startLoc >= 2 else { return nil }
+            let prefixRange = NSRange(location: startLoc - 2, length: 2)
+            if let attr = client.attributedSubstring(from: prefixRange) {
+                let str = attr.string
+                if str == ">>" || str == "》》" || str == "。。" {
+                    return prefixRange
+                }
+            }
+            return nil
+        }()
+
+        if clientPrecedingRange != nil {
+            sentence = ">> " + sentence
+        }
+
         let capturedInputting = inputting
         let capturedClient = client
         let token = afmRequestGate.token()
         let afmClient = self.afmClient
         let delay = AFMTriggerPolicy.delayNanoseconds(for: sentence)
 
-        AFMDevLogger.shared.log("AFM WHOLE-SENTENCE SCHEDULED delay=\(delay/1_000_000)ms, sentence='\(sentence)'")
+        AFMDevLogger.shared.log("AFM WHOLE-SENTENCE SCHEDULED delay=\(delay/1_000_000)ms, sentence='\(sentence)', clientPreceding=\(clientPrecedingRange != nil)")
 
         afmTask = Task { @MainActor [weak self] in
             if delay > 0 {
@@ -1029,7 +1053,7 @@ extension McBopomofoInputMethodController {
             }
 
             // Visual feedback: While AFM is running, turn the entire composing buffer Indigo!
-            capturedInputting.afmPendingRange = NSRange(location: 0, length: sentenceLen)
+            capturedInputting.afmPendingRange = NSRange(location: 0, length: (sentence as NSString).length)
             capturedClient.setMarkedText(
                 capturedInputting.attributedString,
                 selectionRange: NSMakeRange(Int(capturedInputting.cursorIndex), 0),
@@ -1079,7 +1103,7 @@ extension McBopomofoInputMethodController {
             let origNS = sentence as NSString
             let corrNS = correctedSentence as NSString
             let hasCloze = sentence.contains("??") || sentence.contains("？？")
-            let isPromptOptimization = (sentence.hasPrefix(">>") || sentence.hasPrefix("》》")) && Preferences.afmPromptOptimizerEnabled
+            let isPromptOptimization = (sentence.hasPrefix(">>") || sentence.hasPrefix("》》") || sentence.hasPrefix("。。")) && Preferences.afmPromptOptimizerEnabled
             let allowsLengthChange = (hasCloze && Preferences.afmClozeFillingEnabled) || Preferences.afmSemanticFluencyRewriteEnabled || isPromptOptimization
 
             if !allowsLengthChange {
@@ -1092,6 +1116,11 @@ extension McBopomofoInputMethodController {
                     AFMDevLogger.shared.log("AFM WHOLE-SENTENCE LENGTH MISMATCH: orig='\(sentence)', corr='\(correctedSentence)'")
                     return
                 }
+            }
+
+            if let precedingRange = clientPrecedingRange {
+                // Erase the preceding >> from the client document
+                capturedClient.insertText("", replacementRange: precedingRange)
             }
 
             // Find all changed ranges

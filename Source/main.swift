@@ -401,6 +401,8 @@ if CommandLine.arguments.count > 1 {
         let promptOptTrailingZero = (AFMTriggerPolicy.delayNanoseconds(for: ">>測試任務>>") == 0)
         let promptOptPunctZero = (AFMTriggerPolicy.delayNanoseconds(for: ">>測試任務。") == 0)
         let promptOptDebounce = (AFMTriggerPolicy.delayNanoseconds(for: ">>測試任務") == 600_000_000)
+        let promptOptDoublePeriodZero = (AFMTriggerPolicy.delayNanoseconds(for: "。。測試任務。。") == 0)
+        let promptOptDoublePeriodDebounce = (AFMTriggerPolicy.delayNanoseconds(for: "。。測試任務") == 600_000_000)
         let asciiSpaceZero = (AFMTriggerPolicy.delayNanoseconds(for: " ") == 0)
         let fullwidthSpaceZero = (AFMTriggerPolicy.delayNanoseconds(for: "\u{3000}") == 0)
 
@@ -418,6 +420,8 @@ if CommandLine.arguments.count > 1 {
             && promptOptTrailingZero
             && promptOptPunctZero
             && promptOptDebounce
+            && promptOptDoublePeriodZero
+            && promptOptDoublePeriodDebounce
             && asciiSpaceZero
             && fullwidthSpaceZero
 
