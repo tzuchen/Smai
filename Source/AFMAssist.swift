@@ -266,9 +266,20 @@ internal struct AFMAssistClient: Sendable {
             t = String(t.dropFirst().dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
         }
         let punctuationSet: Set<Character> = ["，", "。", "！", "？", "；", "：", "、", ",", ".", "!", "?", ";", ":"]
+        let origStartsWithPunct = original.first.map { punctuationSet.contains($0) } ?? false
         let origEndsWithPunct = original.last.map { punctuationSet.contains($0) } ?? false
+
+        // 若原句無句末標點，但模型擅自加了句號，移除之
         if !origEndsWithPunct && (t.hasSuffix("。") || t.hasSuffix(".")) {
             t = String(t.dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        // 若原句開頭有標點（如逗號），但模型擅自去除了句首標點，自動補回以保持長度與位置對齊
+        if origStartsWithPunct, let firstChar = original.first, !t.hasPrefix(String(firstChar)) {
+            t = String(firstChar) + t
+        }
+        // 若原句結尾有標點，但模型擅自去除了句尾標點，自動補回
+        if origEndsWithPunct, let lastChar = original.last, !t.hasSuffix(String(lastChar)) {
+            t = t + String(lastChar)
         }
         return t
     }
