@@ -302,6 +302,99 @@ if CommandLine.arguments.count > 1 {
 
         exit(diagnosticPassed ? 0 : 2)
     }
+    if CommandLine.arguments[1] == "--diagnose-slash-command" {
+        // 1) Test AFMSymbolPolicy
+        let optSlash = AFMSymbolPolicy.optionSymbolToCommit(charsNoMod: "/", flags: [.option])
+        let optQuestion = AFMSymbolPolicy.optionSymbolToCommit(charsNoMod: "?", flags: [.option, .shift])
+        let optMinus = AFMSymbolPolicy.optionSymbolToCommit(charsNoMod: "-", flags: [.option])
+        let optUnderscore = AFMSymbolPolicy.optionSymbolToCommit(charsNoMod: "_", flags: [.option, .shift])
+        let optPeriod = AFMSymbolPolicy.optionSymbolToCommit(charsNoMod: ".", flags: [.option])
+        let optGreater = AFMSymbolPolicy.optionSymbolToCommit(charsNoMod: ">", flags: [.option, .shift])
+        let optHash = AFMSymbolPolicy.optionSymbolToCommit(charsNoMod: "#", flags: [.option, .shift])
+        let optLetter = AFMSymbolPolicy.optionSymbolToCommit(charsNoMod: "f", flags: [.option])
+        let optCmdSlash = AFMSymbolPolicy.optionSymbolToCommit(charsNoMod: "/", flags: [.option, .command])
+
+        let capsSlash = AFMSymbolPolicy.capsNonLetterToCommit(chars: "/", flags: [.capsLock])
+        let capsMinus = AFMSymbolPolicy.capsNonLetterToCommit(chars: "-", flags: [.capsLock])
+        let capsHash = AFMSymbolPolicy.capsNonLetterToCommit(chars: "#", flags: [.capsLock, .shift])
+        let capsLetter = AFMSymbolPolicy.capsNonLetterToCommit(chars: "a", flags: [.capsLock])
+
+        let symbolPolicyPassed =
+            optSlash == "/"
+            && optQuestion == "?"
+            && optMinus == "-"
+            && optUnderscore == "_"
+            && optPeriod == "."
+            && optGreater == ">"
+            && optHash == "#"
+            && optLetter == nil
+            && optCmdSlash == nil
+            && capsSlash == "/"
+            && capsMinus == "-"
+            && capsHash == "#"
+            && capsLetter == nil
+
+        // 2) Test AFMSlashCommandTracker
+        var tracker = AFMSlashCommandTracker()
+        tracker.start()
+        let startOk = tracker.isActive && tracker.buffer == "/"
+
+        _ = tracker.handleKey(keyCode: 15, chars: "r", flags: [])
+        _ = tracker.handleKey(keyCode: 14, chars: "e", flags: [])
+        _ = tracker.handleKey(keyCode: 1, chars: "s", flags: [])
+        _ = tracker.handleKey(keyCode: 32, chars: "u", flags: [])
+        _ = tracker.handleKey(keyCode: 46, chars: "m", flags: [])
+        _ = tracker.handleKey(keyCode: 14, chars: "e", flags: [])
+        let bufferResume = tracker.buffer == "/resume"
+        let enterAction = tracker.handleKey(keyCode: UInt16(kVK_Return), chars: "\r", flags: [])
+        let enterOk = (enterAction == .commit("/resume")) && !tracker.isActive
+
+        // Space commit test
+        tracker.start()
+        _ = tracker.handleKey(keyCode: 5, chars: "g", flags: [])
+        _ = tracker.handleKey(keyCode: 31, chars: "o", flags: [])
+        _ = tracker.handleKey(keyCode: 0, chars: "a", flags: [])
+        _ = tracker.handleKey(keyCode: 37, chars: "l", flags: [])
+        let spaceAction = tracker.handleKey(keyCode: UInt16(kVK_Space), chars: " ", flags: [])
+        let spaceOk = (spaceAction == .commit("/goal ")) && !tracker.isActive
+
+        // Backspace test
+        tracker.start()
+        _ = tracker.handleKey(keyCode: 4, chars: "h", flags: [])
+        let back1 = tracker.handleKey(keyCode: UInt16(kVK_Delete), chars: "", flags: [])
+        let back1Ok = (back1 == .updateMarked("/")) && tracker.buffer == "/"
+        let back2 = tracker.handleKey(keyCode: UInt16(kVK_Delete), chars: "", flags: [])
+        let back2Ok = (back2 == .cancel) && !tracker.isActive
+
+        // Escape test
+        tracker.start()
+        _ = tracker.handleKey(keyCode: 4, chars: "h", flags: [])
+        let escAction = tracker.handleKey(keyCode: UInt16(kVK_Escape), chars: "", flags: [])
+        let escOk = (escAction == .cancel) && !tracker.isActive
+
+        // Shortcut pass-through test (Cmd+C)
+        tracker.start()
+        _ = tracker.handleKey(keyCode: 8, chars: "c", flags: [])
+        let cmdAction = tracker.handleKey(keyCode: 8, chars: "c", flags: [.command])
+        let cmdOk = (cmdAction == .commitAndPassThrough("/c")) && !tracker.isActive
+
+        let trackerPassed = startOk && bufferResume && enterOk && spaceOk && back1Ok && back2Ok && escOk && cmdOk
+        let diagnosticPassed = symbolPolicyPassed && trackerPassed
+
+        let resultDict: [String: Any] = [
+            "case": "slashCommand",
+            "symbolPolicyPassed": symbolPolicyPassed,
+            "trackerPassed": trackerPassed,
+            "diagnosticPassed": diagnosticPassed
+        ]
+
+        if let data = try? JSONSerialization.data(withJSONObject: resultDict, options: []),
+           let jsonString = String(data: data, encoding: .utf8) {
+            print(jsonString)
+        }
+
+        exit(diagnosticPassed ? 0 : 2)
+    }
     if CommandLine.arguments[1] == "--diagnose-afm-queue" {
         let semaphore = DispatchSemaphore(value: 0)
         Task.detached {

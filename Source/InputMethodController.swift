@@ -156,6 +156,127 @@ struct AFMEnglishCasePolicy {
     }
 }
 
+struct AFMSymbolPolicy {
+    /// Returns the ASCII symbol to commit when Option is held with punctuation/symbol key.
+    /// Returns nil if it should not be intercepted (e.g. letters for Emacs navigation, or command/control held).
+    static func optionSymbolToCommit(charsNoMod: String?, flags: NSEvent.ModifierFlags) -> String? {
+        guard let charsNoMod = charsNoMod, charsNoMod.utf16.count == 1 else { return nil }
+        if flags.contains(.command) || flags.contains(.control) { return nil }
+        guard flags.contains(.option) else { return nil }
+        guard let scalar = charsNoMod.unicodeScalars.first else { return nil }
+        let v = scalar.value
+        // Only printable ASCII characters (0x20...0x7E)
+        guard v >= 0x20 && v <= 0x7E else { return nil }
+        // Do not intercept letters (A-Z, a-z), preserving Option+F, Option+B, Option+D, etc.
+        let isLetter = (v >= 0x41 && v <= 0x5A) || (v >= 0x61 && v <= 0x7A)
+        guard !isLetter else { return nil }
+        return charsNoMod
+    }
+
+    /// Returns the character to commit when Caps Lock is active for non-letter ASCII (symbols, punctuation, digits).
+    static func capsNonLetterToCommit(chars: String?, flags: NSEvent.ModifierFlags) -> String? {
+        guard let chars = chars, chars.utf16.count == 1 else { return nil }
+        if flags.contains(.command) || flags.contains(.control) || flags.contains(.option) { return nil }
+        guard let scalar = chars.unicodeScalars.first else { return nil }
+        let v = scalar.value
+        // Non-letter printable ASCII (0x21...0x7E excluding A-Z, a-z)
+        guard v >= 0x21 && v <= 0x7E else { return nil }
+        let isLetter = (v >= 0x41 && v <= 0x5A) || (v >= 0x61 && v <= 0x7A)
+        guard !isLetter else { return nil }
+        return chars
+    }
+}
+
+struct AFMSlashCommandTracker {
+    enum Action: Equatable {
+        case ignore
+        case updateMarked(String)
+        case commit(String)
+        case commitAndPassThrough(String)
+        case cancel
+    }
+
+    private(set) var isActive: Bool = false
+    private(set) var buffer: String = ""
+
+    mutating func reset() {
+        isActive = false
+        buffer = ""
+    }
+
+    mutating func start() {
+        isActive = true
+        buffer = "/"
+    }
+
+    mutating func handleKey(
+        keyCode: UInt16,
+        chars: String,
+        flags: NSEvent.ModifierFlags
+    ) -> Action {
+        guard isActive else { return .ignore }
+
+        let hasCmd = flags.contains(.command)
+        let hasCtrl = flags.contains(.control)
+
+        // Shortcut modifiers (Cmd+C, Ctrl+C, etc.): commit command typed so far and pass shortcut to client
+        if hasCmd || hasCtrl {
+            let text = buffer
+            reset()
+            return .commitAndPassThrough(text)
+        }
+
+        // Return / Enter -> commit command
+        if keyCode == UInt16(kVK_Return) {
+            let text = buffer
+            reset()
+            return .commit(text)
+        }
+
+        // Space -> commit command with trailing space
+        if keyCode == UInt16(kVK_Space) {
+            let text = buffer + " "
+            reset()
+            return .commit(text)
+        }
+
+        // Delete / Backspace
+        if keyCode == UInt16(kVK_Delete) {
+            if buffer.count > 1 {
+                buffer.removeLast()
+                return .updateMarked(buffer)
+            } else {
+                reset()
+                return .cancel
+            }
+        }
+
+        // Escape -> cancel
+        if keyCode == UInt16(kVK_Escape) {
+            reset()
+            return .cancel
+        }
+
+        // Arrow keys (123 = Left, 124 = Right, 125 = Down, 126 = Up) -> commit and pass through
+        if keyCode >= 123 && keyCode <= 126 {
+            let text = buffer
+            reset()
+            return .commitAndPassThrough(text)
+        }
+
+        // Valid printable ASCII character (letters, numbers, symbols)
+        if chars.utf16.count == 1, let scalar = chars.unicodeScalars.first, scalar.value >= 0x21 && scalar.value <= 0x7E {
+            buffer += chars
+            return .updateMarked(buffer)
+        }
+
+        // Any other key (e.g. Tab, Function keys, non-ASCII): commit and let client handle
+        let text = buffer
+        reset()
+        return .commitAndPassThrough(text)
+    }
+}
+
 internal var gCurrentCandidateController: CandidateController?
 
 extension CandidateController {
@@ -185,6 +306,15 @@ class McBopomofoInputMethodController: IMKInputController {
 
     private static var capsLockSwitch = AFMCapsLockSwitch()
     private static var casePolicy = AFMEnglishCasePolicy()
+    private var slashTracker = AFMSlashCommandTracker()
+
+    private func resetSlashMarkedText(client: Any?) {
+        (client as? IMKTextInput)?.setMarkedText(
+            "",
+            selectionRange: NSRange(location: 0, length: 0),
+            replacementRange: NSRange(location: NSNotFound, length: NSNotFound)
+        )
+    }
 
     // Share the stored issues, so a set of issues is shown as notification only once.
     static var latestUserFileIssues: [String] = []
@@ -356,6 +486,14 @@ class McBopomofoInputMethodController: IMKInputController {
 
     override func deactivateServer(_ client: Any!) {
         cancelAFMRequest()
+        if slashTracker.isActive {
+            let text = slashTracker.buffer
+            slashTracker.reset()
+            resetSlashMarkedText(client: client)
+            if let client = client as? IMKTextInput {
+                commit(text: text, client: client)
+            }
+        }
         currentClient = nil
         keyHandler.clear()
         Self.casePolicy.resetShiftTracking()
@@ -385,6 +523,15 @@ class McBopomofoInputMethodController: IMKInputController {
 
     override func commitComposition(_ client: Any!) {
         cancelAFMRequest()
+        if slashTracker.isActive {
+            let text = slashTracker.buffer
+            slashTracker.reset()
+            resetSlashMarkedText(client: client)
+            if let client = client as? IMKTextInput {
+                commit(text: text, client: client)
+            }
+            return
+        }
         if let inputting = state as? InputState.Inputting {
             commit(text: inputting.composingBuffer, client: client)
             keyHandler.clear()
@@ -574,28 +721,123 @@ class McBopomofoInputMethodController: IMKInputController {
                 || CGEventSource.flagsState(.combinedSessionState).contains(.maskAlphaShift)
                 || Self.capsLockSwitch.isFallbackEnglish
 
-            let isLetter = (chars.utf16.count == 1) && {
-                guard let scalar = chars.unicodeScalars.first,
-                      !event.modifierFlags.contains(.command),
-                      !event.modifierFlags.contains(.control),
-                      !event.modifierFlags.contains(.option) else { return false }
-                let v = scalar.value
-                return (v >= 0x41 && v <= 0x5A) || (v >= 0x61 && v <= 0x7A)
-            }()
-            let isUpper = isLetter && (chars.unicodeScalars.first!.value <= 0x5A)
+            let hasCmd = event.modifierFlags.contains(.command)
+            let hasCtrl = event.modifierFlags.contains(.control)
+            let hasOpt = event.modifierFlags.contains(.option)
+            let hasShift = event.modifierFlags.contains(.shift)
 
-            if isLetter && (isCapsActive || (isUpper && !Self.casePolicy.physicalShiftIsDown)) {
-                if let client = client as? IMKTextInput,
-                   let letter = Self.casePolicy.letterToCommit(text: chars, flags: event.modifierFlags) {
+            // 1. If Smart Slash Command mode is active, intercept all keystrokes
+            if slashTracker.isActive {
+                let action = slashTracker.handleKey(keyCode: event.keyCode, chars: chars, flags: event.modifierFlags)
+                switch action {
+                case .updateMarked(let marked):
+                    (client as? IMKTextInput)?.setMarkedText(
+                        marked,
+                        selectionRange: NSRange(location: marked.utf16.count, length: 0),
+                        replacementRange: NSRange(location: NSNotFound, length: NSNotFound)
+                    )
+                    return true
+                case .commit(let text):
+                    self.resetSlashMarkedText(client: client)
+                    if let client = client as? IMKTextInput {
+                        self.commit(text: text, client: client)
+                    }
+                    AFMDevLogger.shared.log("SLASH COMMAND COMMITTED: '\(text)'")
+                    return true
+                case .commitAndPassThrough(let text):
+                    self.resetSlashMarkedText(client: client)
+                    if let client = client as? IMKTextInput {
+                        self.commit(text: text, client: client)
+                    }
+                    AFMDevLogger.shared.log("SLASH COMMAND PASSED THROUGH: '\(text)'")
+                    return false
+                case .cancel:
+                    self.resetSlashMarkedText(client: client)
+                    AFMDevLogger.shared.log("SLASH COMMAND CANCELLED")
+                    return true
+                case .ignore:
+                    break
+                }
+            }
+
+            // 2. Option + symbol shortcut (universal half-width punctuation / symbols)
+            if let optionSymbol = AFMSymbolPolicy.optionSymbolToCommit(charsNoMod: charsNoMod, flags: event.modifierFlags) {
+                if let client = client as? IMKTextInput {
                     if state is InputState.NotEmpty {
                         self.commitComposition(client)
                         keyHandler.clear()
                         self.handle(state: InputState.Empty(), client: client)
                     }
-                    AFMDevLogger.shared.log("CAPS COMMITTED: orig='\(chars)', flags=[\(flagsStr)], physShift=\(Self.casePolicy.physicalShiftIsDown) -> '\(letter)'")
-                    self.commit(text: letter, client: client)
+                    AFMDevLogger.shared.log("OPTION SYMBOL COMMITTED: '\(optionSymbol)'")
+                    self.commit(text: optionSymbol, client: client)
                     return true
                 }
+            }
+
+            // 3. Caps Lock active: letters and non-letter ASCII (symbols/digits)
+            if isCapsActive && !hasCmd && !hasCtrl && !hasOpt {
+                let isLetter = (chars.utf16.count == 1) && {
+                    guard let scalar = chars.unicodeScalars.first else { return false }
+                    let v = scalar.value
+                    return (v >= 0x41 && v <= 0x5A) || (v >= 0x61 && v <= 0x7A)
+                }()
+                if isLetter {
+                    if let client = client as? IMKTextInput,
+                       let letter = Self.casePolicy.letterToCommit(text: chars, flags: event.modifierFlags) {
+                        if state is InputState.NotEmpty {
+                            self.commitComposition(client)
+                            keyHandler.clear()
+                            self.handle(state: InputState.Empty(), client: client)
+                        }
+                        AFMDevLogger.shared.log("CAPS COMMITTED (LETTER): orig='\(chars)' -> '\(letter)'")
+                        self.commit(text: letter, client: client)
+                        return true
+                    }
+                } else if let nonLetter = AFMSymbolPolicy.capsNonLetterToCommit(chars: chars, flags: event.modifierFlags) {
+                    if let client = client as? IMKTextInput {
+                        if state is InputState.NotEmpty {
+                            self.commitComposition(client)
+                            keyHandler.clear()
+                            self.handle(state: InputState.Empty(), client: client)
+                        }
+                        AFMDevLogger.shared.log("CAPS COMMITTED (SYMBOL/DIGIT): '\(nonLetter)'")
+                        self.commit(text: nonLetter, client: client)
+                        return true
+                    }
+                }
+            } else {
+                // Caps Lock NOT active: uppercase letter via shift if applicable
+                let isLetter = (chars.utf16.count == 1) && {
+                    guard let scalar = chars.unicodeScalars.first, !hasCmd, !hasCtrl, !hasOpt else { return false }
+                    let v = scalar.value
+                    return (v >= 0x41 && v <= 0x5A) || (v >= 0x61 && v <= 0x7A)
+                }()
+                let isUpper = isLetter && (chars.unicodeScalars.first!.value <= 0x5A)
+                if isLetter && isUpper && !Self.casePolicy.physicalShiftIsDown {
+                    if let client = client as? IMKTextInput,
+                       let letter = Self.casePolicy.letterToCommit(text: chars, flags: event.modifierFlags) {
+                        if state is InputState.NotEmpty {
+                            self.commitComposition(client)
+                            keyHandler.clear()
+                            self.handle(state: InputState.Empty(), client: client)
+                        }
+                        self.commit(text: letter, client: client)
+                        return true
+                    }
+                }
+            }
+
+            // 4. Trigger Smart Slash Command Mode when buffer is empty and user presses '/'
+            let isSlashKey = event.keyCode == UInt16(kVK_ANSI_Slash) && !hasShift && !hasCmd && !hasCtrl && !hasOpt && !isCapsActive
+            if isSlashKey && (state is InputState.Empty) {
+                slashTracker.start()
+                (client as? IMKTextInput)?.setMarkedText(
+                    slashTracker.buffer,
+                    selectionRange: NSRange(location: 1, length: 0),
+                    replacementRange: NSRange(location: NSNotFound, length: NSNotFound)
+                )
+                AFMDevLogger.shared.log("SMART SLASH COMMAND ACTIVATED: '/'")
+                return true
             }
         }
 
@@ -1271,6 +1513,9 @@ extension McBopomofoInputMethodController {
     }
 
     private func handle(state: InputState.Deactivated, previous: InputState, client: Any?) {
+        if slashTracker.isActive {
+            slashTracker.reset()
+        }
         currentClient = nil
 
         gCurrentCandidateController?.delegate = nil
