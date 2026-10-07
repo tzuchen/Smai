@@ -210,6 +210,12 @@ internal final class AFMEndpointResolver: @unchecked Sendable {
         }
     }
 
+    var cachedWorkingURL: String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return cachedWorkingQwenURL
+    }
+
     func afmEndpoints() -> [String] {
         let custom = Preferences.afmEdgeServerURL.trimmingCharacters(in: .whitespacesAndNewlines)
         if !custom.isEmpty {
@@ -339,15 +345,8 @@ internal struct AFMAssistClient: Sendable {
     }
 
     private func performCorrectSentence(sentence: String) async -> String? {
-        let isPromptOptimization = (
-            sentence.hasPrefix(">>") || sentence.hasPrefix("》》") || sentence.hasPrefix("。。") ||
-            sentence.hasSuffix(">>") || sentence.hasSuffix("》》") || sentence.hasSuffix("。。")
-        ) && Preferences.afmPromptOptimizerEnabled
-
-        // 1. Try Qwen endpoints. For prompt optimization, prioritize LAN endpoint directly to prevent slow DNS/failover.
-        let qwenCandidates = isPromptOptimization
-            ? ["http://192.168.31.128:8000/v1/chat/completions"]
-            : AFMEndpointResolver.shared.qwenEndpoints()
+        // 1. Try Qwen endpoints (supports LAN, Tailscale, or custom URL)
+        let qwenCandidates = AFMEndpointResolver.shared.qwenEndpoints()
         for endpoint in qwenCandidates {
             try? Task.checkCancellation()
             if Task.isCancelled { return nil }
@@ -388,7 +387,8 @@ internal struct AFMAssistClient: Sendable {
                 sentence.hasPrefix(">>") || sentence.hasPrefix("》》") || sentence.hasPrefix("。。") ||
                 sentence.hasSuffix(">>") || sentence.hasSuffix("》》") || sentence.hasSuffix("。。")
             ) && Preferences.afmPromptOptimizerEnabled
-            request.timeoutInterval = isPromptOptimization ? 10.0 : 2.5
+            let isCachedWorking = (endpoint == AFMEndpointResolver.shared.cachedWorkingURL)
+            request.timeoutInterval = isPromptOptimization ? 10.0 : (isCachedWorking ? 2.5 : 1.5)
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
             var allowsLengthChange = false
