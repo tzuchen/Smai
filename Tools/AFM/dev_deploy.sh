@@ -7,7 +7,8 @@ set -e
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TARGET_APP="/Library/Input Methods/Smai.app"
-BUILT_APP="$REPO_ROOT/.build/xcode/Build/Products/Debug/McBopomofo.app"
+DERIVED_DATA_PATH="$REPO_ROOT/.build/xcode-$USER"
+BUILT_APP="$DERIVED_DATA_PATH/Build/Products/Debug/McBopomofo.app"
 
 cd "$REPO_ROOT"
 
@@ -18,7 +19,7 @@ deploy() {
     xcodebuild -project McBopomofo.xcodeproj \
                -scheme McBopomofo \
                -configuration Debug \
-               -derivedDataPath .build/xcode \
+               -derivedDataPath "$DERIVED_DATA_PATH" \
                -destination 'platform=macOS,arch=arm64' \
                build \
                CODE_SIGN_IDENTITY="" \

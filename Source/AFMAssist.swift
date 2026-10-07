@@ -365,8 +365,11 @@ internal struct AFMAssistClient: Sendable {
 
             var request = URLRequest(url: url)
             request.httpMethod = "POST"
-            let isPromptOptimization = (sentence.hasPrefix(">>") || sentence.hasPrefix("》》") || sentence.hasPrefix("。。")) && Preferences.afmPromptOptimizerEnabled
-            // Use 8.0s timeout for prompt optimization (generates ~100 tokens), 1.2s for normal sentence correction
+            let isPromptOptimization = (
+                sentence.hasPrefix(">>") || sentence.hasPrefix("》》") || sentence.hasPrefix("。。") ||
+                sentence.hasSuffix(">>") || sentence.hasSuffix("》》") || sentence.hasSuffix("。。")
+            ) && Preferences.afmPromptOptimizerEnabled
+            // Use 8.0s timeout for prompt optimization (generates ~100-200 tokens), 1.2s for normal sentence correction
             request.timeoutInterval = isPromptOptimization ? 8.0 : 1.2
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
@@ -385,11 +388,14 @@ internal struct AFMAssistClient: Sendable {
                     cleanDemand = String(cleanDemand.dropLast(2))
                 }
                 cleanDemand = cleanDemand.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard cleanDemand.count >= 2 else { return nil }
+                guard cleanDemand.count >= 2 else {
+                    AFMDevLogger.shared.log("PROMPT-OPT SKIPPED: demand too short: '\(cleanDemand)'")
+                    return nil
+                }
 
                 sysPrompt = """
                 你是 AI Coding Agent 與 LLM 提示詞工程專家（專精於 agy, codex, Claude 的溝通）。
-                使用者的輸入以「>>」開頭，請將這段口語需求改寫成一段精準、不冗長、能點出關鍵盲點與防誤導條件的繁體中文 Prompt。
+                使用者的輸入以「>>」開頭或「。。」結尾，請將這段口語需求改寫成一段精準、不冗長、能點出關鍵盲點與防誤導條件的繁體中文 Prompt。
 
                 改寫原則：
                 1. 【精簡有力】：以 1 至 3 句話或精準規格為限（約 60-120 字），適合直接作為終端或輸入框的指令。
@@ -410,7 +416,7 @@ internal struct AFMAssistClient: Sendable {
             var body: [String: Any] = [
                 "model": isQwen ? "spark-vllm-docker" : "system",
                 "temperature": isPromptOptimization ? 0.1 : 0.0,
-                "max_tokens": isPromptOptimization ? 160 : 128,
+                "max_tokens": isPromptOptimization ? 256 : 128,
                 "stream": false,
                 "messages": [
                     ["role": "system", "content": sysPrompt],

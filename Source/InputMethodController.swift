@@ -42,7 +42,23 @@ private let kMinKeyLabelSize: CGFloat = 10
 
 struct AFMTriggerPolicy {
     static func delayNanoseconds(for text: String) -> UInt64 {
-        if text.hasPrefix(">>") || text.hasPrefix("》》") || text.hasPrefix("。。") {
+        let isPromptOpt = text.hasPrefix(">>") || text.hasPrefix("》》") || text.hasPrefix("。。")
+            || text.hasSuffix(">>") || text.hasSuffix("》》") || text.hasSuffix("。。")
+        if isPromptOpt {
+            var clean = text
+            if clean.hasPrefix(">>") || clean.hasPrefix("》》") || clean.hasPrefix("。。") {
+                clean = String(clean.dropFirst(2))
+            }
+            if clean.hasSuffix(">>") || clean.hasSuffix("》》") || clean.hasSuffix("。。") {
+                clean = String(clean.dropLast(2))
+            }
+            clean = clean.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            // If user only typed the trigger alone with no prompt text yet (e.g. "。。" or ">>"), do not trigger immediately!
+            guard clean.count >= 2 else {
+                return 600_000_000
+            }
+
             if text.hasSuffix(">>") || text.hasSuffix("》》") || text.hasSuffix("。。") {
                 return 0
             }
@@ -489,31 +505,6 @@ class McBopomofoInputMethodController: IMKInputController {
         }
 
         if event.type == .flagsChanged {
-            Self.casePolicy.observeModifierEvent(
-                keyCode: event.keyCode,
-                shiftIsOn: event.modifierFlags.contains(.shift)
-            )
-            if event.keyCode == UInt16(kVK_CapsLock) {
-                let decision = Self.capsLockSwitch.handleCapsLock(
-                    isOn: event.modifierFlags.contains(.capsLock),
-                    timestamp: event.timestamp
-                )
-                switch decision {
-                case .native:
-                    self.commitComposition(client)
-                    (client as? IMKTextInput)?.overrideKeyboard(withKeyboardNamed: Preferences.basisKeyboardLayout)
-                    return false
-                case .duplicate:
-                    return true
-                case .toggle:
-                    self.commitComposition(client)
-                    keyHandler.clear()
-                    self.handle(state: .Empty(), client: client)
-                    (client as? IMKTextInput)?.overrideKeyboard(withKeyboardNamed: Preferences.basisKeyboardLayout)
-                    return true
-                }
-            }
-
             if Preferences.switchInputSourceUponCommandKeyPressEnabled,
                (event.keyCode == UInt16(kVK_Command) || event.keyCode == UInt16(kVK_RightCommand)),
                event.modifierFlags.contains(.command) {
@@ -566,23 +557,6 @@ class McBopomofoInputMethodController: IMKInputController {
                 event.modifierFlags.contains(.capsLock) ? "caps" : nil
             ].compactMap { $0 }.joined(separator: "|")
             AFMDevLogger.shared.log("KEY DOWN keyCode=\(event.keyCode), chars='\(chars)', charsNoMod='\(charsNoMod)', flags=[\(flagsStr)]")
-
-            if event.modifierFlags.contains(.capsLock) {
-                Self.capsLockSwitch.observeNativeCapsOn()
-            }
-            if event.modifierFlags.contains(.capsLock) || Self.capsLockSwitch.isFallbackEnglish {
-                if let client = client as? IMKTextInput,
-                   let letter = Self.casePolicy.letterToCommit(
-                       text: event.characters,
-                       flags: event.modifierFlags
-                   ) {
-                    self.commit(text: letter, client: client)
-                    return true
-                }
-                if Self.capsLockSwitch.isFallbackEnglish {
-                    return false
-                }
-            }
         }
 
         var textFrame = NSRect.zero
@@ -1016,11 +990,24 @@ extension McBopomofoInputMethodController {
             let sel = client.selectedRange()
             let startLoc = (marked.location != NSNotFound) ? marked.location : sel.location
             guard startLoc != NSNotFound && startLoc >= 2 else { return nil }
-            let prefixRange = NSRange(location: startLoc - 2, length: 2)
-            if let attr = client.attributedSubstring(from: prefixRange) {
-                let str = attr.string
-                if str == ">>" || str == "》》" || str == "。。" {
-                    return prefixRange
+
+            let checkLen = min(startLoc, 16)
+            let searchRange = NSRange(location: startLoc - checkLen, length: checkLen)
+            guard let attr = client.attributedSubstring(from: searchRange) else { return nil }
+            let precedingText = attr.string
+
+            let triggers = [">>", "》》", "。。"]
+            for trigger in triggers {
+                if let range = precedingText.range(of: trigger, options: .backwards) {
+                    let suffix = precedingText[range.upperBound...]
+                    if suffix.allSatisfy({ $0.isWhitespace }) {
+                        let nsPreceding = precedingText as NSString
+                        let triggerNSRange = nsPreceding.range(of: trigger, options: .backwards)
+                        if triggerNSRange.location != NSNotFound {
+                            let replaceLen = checkLen - triggerNSRange.location
+                            return NSRange(location: startLoc - replaceLen, length: replaceLen)
+                        }
+                    }
                 }
             }
             return nil
@@ -1103,7 +1090,10 @@ extension McBopomofoInputMethodController {
             let origNS = sentence as NSString
             let corrNS = correctedSentence as NSString
             let hasCloze = sentence.contains("??") || sentence.contains("？？")
-            let isPromptOptimization = (sentence.hasPrefix(">>") || sentence.hasPrefix("》》") || sentence.hasPrefix("。。")) && Preferences.afmPromptOptimizerEnabled
+            let isPromptOptimization = (
+                sentence.hasPrefix(">>") || sentence.hasPrefix("》》") || sentence.hasPrefix("。。") ||
+                sentence.hasSuffix(">>") || sentence.hasSuffix("》》") || sentence.hasSuffix("。。")
+            ) && Preferences.afmPromptOptimizerEnabled
             let allowsLengthChange = (hasCloze && Preferences.afmClozeFillingEnabled) || Preferences.afmSemanticFluencyRewriteEnabled || isPromptOptimization
 
             if !allowsLengthChange {
