@@ -505,6 +505,11 @@ class McBopomofoInputMethodController: IMKInputController {
         }
 
         if event.type == .flagsChanged {
+            Self.casePolicy.observeModifierEvent(
+                keyCode: event.keyCode,
+                shiftIsOn: event.modifierFlags.contains(.shift)
+            )
+
             if Preferences.switchInputSourceUponCommandKeyPressEnabled,
                (event.keyCode == UInt16(kVK_Command) || event.keyCode == UInt16(kVK_RightCommand)),
                event.modifierFlags.contains(.command) {
@@ -557,6 +562,25 @@ class McBopomofoInputMethodController: IMKInputController {
                 event.modifierFlags.contains(.capsLock) ? "caps" : nil
             ].compactMap { $0 }.joined(separator: "|")
             AFMDevLogger.shared.log("KEY DOWN keyCode=\(event.keyCode), chars='\(chars)', charsNoMod='\(charsNoMod)', flags=[\(flagsStr)]")
+
+            if event.modifierFlags.contains(.capsLock) {
+                if let client = client as? IMKTextInput,
+                   let scalar = chars.unicodeScalars.first,
+                   chars.utf16.count == 1,
+                   !event.modifierFlags.contains(.command),
+                   !event.modifierFlags.contains(.control),
+                   !event.modifierFlags.contains(.option),
+                   (scalar.value >= 0x41 && scalar.value <= 0x5A) || (scalar.value >= 0x61 && scalar.value <= 0x7A) {
+                    if state is InputState.NotEmpty {
+                        self.commitComposition(client)
+                        keyHandler.clear()
+                        self.handle(state: InputState.Empty(), client: client)
+                    }
+                    let letter = Self.casePolicy.physicalShiftIsDown ? chars.uppercased() : chars.lowercased()
+                    self.commit(text: letter, client: client)
+                    return true
+                }
+            }
         }
 
         var textFrame = NSRect.zero

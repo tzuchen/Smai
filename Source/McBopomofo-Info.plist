@@ -334,5 +334,10 @@
 	</array>
 	<key>tsInputMethodIconFileKey</key>
 	<string>Bopomofo.tiff</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
 </dict>
 </plist>

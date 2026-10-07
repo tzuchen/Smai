@@ -226,7 +226,7 @@ internal struct AFMAssistClient: Sendable {
     private let session: URLSession
     private let timeout: TimeInterval
 
-    init(session: URLSession? = nil, timeout: TimeInterval = 3.0) {
+    init(session: URLSession? = nil, timeout: TimeInterval = 10.0) {
         self.timeout = timeout
         if let session = session {
             self.session = session
@@ -327,8 +327,15 @@ internal struct AFMAssistClient: Sendable {
     }
 
     private func performCorrectSentence(sentence: String) async -> String? {
-        // 1. Try Qwen endpoints (custom preference, LAN, Tailscale MagicDNS, or Tailscale IP)
-        let qwenCandidates = AFMEndpointResolver.shared.qwenEndpoints()
+        let isPromptOptimization = (
+            sentence.hasPrefix(">>") || sentence.hasPrefix("》》") || sentence.hasPrefix("。。") ||
+            sentence.hasSuffix(">>") || sentence.hasSuffix("》》") || sentence.hasSuffix("。。")
+        ) && Preferences.afmPromptOptimizerEnabled
+
+        // 1. Try Qwen endpoints. For prompt optimization, prioritize LAN endpoint directly to prevent slow DNS/failover.
+        let qwenCandidates = isPromptOptimization
+            ? ["http://192.168.31.128:8000/v1/chat/completions"]
+            : AFMEndpointResolver.shared.qwenEndpoints()
         for endpoint in qwenCandidates {
             try? Task.checkCancellation()
             if Task.isCancelled { return nil }
@@ -369,8 +376,7 @@ internal struct AFMAssistClient: Sendable {
                 sentence.hasPrefix(">>") || sentence.hasPrefix("》》") || sentence.hasPrefix("。。") ||
                 sentence.hasSuffix(">>") || sentence.hasSuffix("》》") || sentence.hasSuffix("。。")
             ) && Preferences.afmPromptOptimizerEnabled
-            // Use 8.0s timeout for prompt optimization (generates ~100-200 tokens), 1.2s for normal sentence correction
-            request.timeoutInterval = isPromptOptimization ? 8.0 : 1.2
+            request.timeoutInterval = isPromptOptimization ? 10.0 : 2.5
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
             var allowsLengthChange = false
@@ -395,10 +401,10 @@ internal struct AFMAssistClient: Sendable {
 
                 sysPrompt = """
                 你是 AI Coding Agent 與 LLM 提示詞工程專家（專精於 agy, codex, Claude 的溝通）。
-                使用者的輸入以「>>」開頭或「。。」結尾，請將這段口語需求改寫成一段精準、不冗長、能點出關鍵盲點與防誤導條件的繁體中文 Prompt。
+                請將這段口語需求改寫成一段精準、不冗長、能點出關鍵盲點與防誤導條件的繁體中文 Prompt（約 50-80 字）。
 
                 改寫原則：
-                1. 【精簡有力】：以 1 至 3 句話或精準規格為限（約 60-120 字），適合直接作為終端或輸入框的指令。
+                1. 【精簡有力】：以 1 至 2 句話或精準規格為限，適合直接作為終端或輸入框的指令。
                 2. 【防誤導與盲點】：自動補齊模糊細節（例如：具體範圍、限制數值、錯誤提示、邊界處理、不破壞現有架構）。
                 3. 【語言】：一律使用繁體中文。
                 4. 【輸出格式】：直接輸出最佳化後的 Prompt，嚴禁任何引號、前綴或多餘客套解釋。
@@ -416,7 +422,7 @@ internal struct AFMAssistClient: Sendable {
             var body: [String: Any] = [
                 "model": isQwen ? "spark-vllm-docker" : "system",
                 "temperature": isPromptOptimization ? 0.1 : 0.0,
-                "max_tokens": isPromptOptimization ? 256 : 128,
+                "max_tokens": isPromptOptimization ? 100 : 128,
                 "stream": false,
                 "messages": [
                     ["role": "system", "content": sysPrompt],
