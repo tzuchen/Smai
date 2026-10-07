@@ -26,7 +26,7 @@
 import Foundation
 import Testing
 
-@testable import McBopomofo
+@testable import Smai
 
 @Suite("Native AFM Assist", .serialized)
 struct AFMAssistTests {

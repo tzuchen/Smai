@@ -8,7 +8,7 @@ set -e
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TARGET_APP="/Library/Input Methods/Smai.app"
 DERIVED_DATA_PATH="$REPO_ROOT/.build/xcode-$USER"
-BUILT_APP="$DERIVED_DATA_PATH/Build/Products/Debug/McBopomofo.app"
+BUILT_APP="$DERIVED_DATA_PATH/Build/Products/Debug/Smai.app"
 
 cd "$REPO_ROOT"
 
@@ -37,6 +37,7 @@ deploy() {
     fi
 
     echo "🔄 [3/4] 重啟思脈注音進程..."
+    killall Smai 2>/dev/null || true
     killall McBopomofo 2>/dev/null || true
     open "$TARGET_APP" 2>/dev/null || true
 

@@ -23,7 +23,7 @@
 
 import Testing
 
-@testable import McBopomofo
+@testable import Smai
 
 @Suite("Associated Phrases Testing")
 final class AssociatedPhrasesTests {

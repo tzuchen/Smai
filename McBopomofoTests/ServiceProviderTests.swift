@@ -24,7 +24,7 @@
 import AppKit
 import Testing
 
-@testable import McBopomofo
+@testable import Smai
 
 @Suite("Test the service provider", .serialized)
 final class ServiceProviderTests {

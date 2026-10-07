@@ -23,7 +23,7 @@
 
 import Testing
 
-@testable import McBopomofo
+@testable import Smai
 
 @Suite("Version Update API Tests")
 final class VersionUpdateApiTests {

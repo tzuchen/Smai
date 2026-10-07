@@ -23,7 +23,7 @@
 
 import Testing
 
-@testable import McBopomofo
+@testable import Smai
 
 @Suite("Preference Tests", .serialized)
 final class PreferencesTests {

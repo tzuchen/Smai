@@ -23,7 +23,7 @@
 
 #import "LanguageModelManager.h"
 #import "LanguageModelManager+Privates.h"
-#import "McBopomofo-Swift.h"
+#import "Smai-Swift.h"
 
 #include "UTF8Helper.h"
 #include "AssociatedPhrasesV2.h"

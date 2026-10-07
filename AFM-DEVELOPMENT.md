@@ -120,7 +120,7 @@ Xcode 27 is installed and `checkFirstLaunchStatus` passes. A native upstream `Mc
 
     DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project McBopomofo.xcodeproj -scheme McBopomofo -configuration Debug -derivedDataPath .build/xcode CODE_SIGNING_ALLOWED=NO build
 
-Artifact: `.build/xcode/Build/Products/Debug/McBopomofo.app`
+Artifact: `.build/xcode/Build/Products/Debug/Smai.app`
 
 This build is not installed into the system. The Xcode toolchain is available and functional. Real-app UX has not been tested.
 
@@ -128,9 +128,9 @@ This build is not installed into the system. The Xcode toolchain is available an
 
 The AFM fork uses a distinct bundle identity to prevent overwriting upstream installations:
 
-- **Bundle ID**: `org.orin.inputmethod.McBopomofoAFM`
-- **Input Modes**: `org.orin.inputmethod.McBopomofoAFM.Bopomofo`, `org.orin.inputmethod.McBopomofoAFM.PlainBopomofo`
-- **Connection Name**: `McBopomofoAFM_1_Connection`
+- **Bundle ID**: `org.orin.inputmethod.Smai`
+- **Input Modes**: `org.orin.inputmethod.Smai.Bopomofo`, `org.orin.inputmethod.Smai.PlainBopomofo`
+- **Connection Name**: `Smai_1_Connection`
 
 ### Build and Package
 
@@ -139,7 +139,7 @@ The packaging script builds the app with the new fork identity and copies it to 
     python3 Tools/AFM/package.py --build
 
 This command:
-1. Runs the scoped Xcode build to produce `.build/xcode/Build/Products/Debug/McBopomofo.app` with the new fork identity.
+1. Runs the scoped Xcode build to produce `.build/xcode/Build/Products/Debug/Smai.app` with the new fork identity.
 2. Verifies the source app's `Info.plist` matches the expected AFM identity.
 3. Copies the app bundle to `.build/afm-distribution/McBopomofoAFM.app` using `/usr/bin/ditto`.
 4. Refuses to overwrite an existing destination. Use `--output` to specify a custom new path.

@@ -79,7 +79,7 @@
 
 部屬完成後，只需重啟輸入法進程即可套用最新變更：
 ```bash
-killall McBopomofo
+killall Smai
 ```
 
 ### 系統需求

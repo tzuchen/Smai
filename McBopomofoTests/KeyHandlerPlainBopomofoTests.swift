@@ -23,7 +23,7 @@
 
 import XCTest
 
-@testable import McBopomofo
+@testable import Smai
 
 class KeyHandlerPlainBopomofoTests: XCTestCase {
 

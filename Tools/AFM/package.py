@@ -32,7 +32,7 @@ EXPECTED_MODE_IDS = [
 ]
 
 # Default paths
-DEFAULT_SOURCE_APP = REPO_ROOT / ".build" / "xcode" / "Build" / "Products" / "Debug" / "McBopomofo.app"
+DEFAULT_SOURCE_APP = REPO_ROOT / ".build" / "xcode" / "Build" / "Products" / "Debug" / "Smai.app"
 DEFAULT_OUTPUT = REPO_ROOT / ".build" / "afm-distribution" / "Smai.app"
 
 def sha256_file(path: Path) -> str:

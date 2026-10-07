@@ -31,7 +31,7 @@
 		6ACA41FB15FC1D9000935EF6 /* License.rtf in Resources */ = {isa = PBXBuildFile; fileRef = 6ACA41EC15FC1D9000935EF6 /* License.rtf */; };
 		6ACA41FC15FC1D9000935EF6 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = 6ACA41EE15FC1D9000935EF6 /* Localizable.strings */; };
 		6ACA41FD15FC1D9000935EF6 /* MainMenu.xib in Resources */ = {isa = PBXBuildFile; fileRef = 6ACA41F015FC1D9000935EF6 /* MainMenu.xib */; };
-		6ACA420215FC1E5200935EF6 /* McBopomofo.app in Resources */ = {isa = PBXBuildFile; fileRef = 6A0D4EA215FC0D2D00ABF4B3 /* McBopomofo.app */; };
+		6ACA420215FC1E5200935EF6 /* Smai.app in Resources */ = {isa = PBXBuildFile; fileRef = 6A0D4EA215FC0D2D00ABF4B3 /* Smai.app */; };
 		6ACC3D442793701600F1B140 /* ParselessPhraseDB.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 6ACC3D402793701600F1B140 /* ParselessPhraseDB.cpp */; };
 		6ACC3D452793701600F1B140 /* ParselessLM.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 6ACC3D422793701600F1B140 /* ParselessLM.cpp */; };
 		6AD7CBC815FE555000691B5B /* data-plain-bpmf.txt in Resources */ = {isa = PBXBuildFile; fileRef = 6AD7CBC715FE555000691B5B /* data-plain-bpmf.txt */; };
@@ -129,7 +129,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		6A0D4EA215FC0D2D00ABF4B3 /* McBopomofo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = McBopomofo.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		6A0D4EA215FC0D2D00ABF4B3 /* Smai.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Smai.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		6A0D4EEF15FC0DA600ABF4B3 /* Bopomofo.tiff */ = {isa = PBXFileReference; lastKnownFileType = image.tiff; path = Bopomofo.tiff; sourceTree = "<group>"; };
 		6A0D4EF015FC0DA600ABF4B3 /* Bopomofo@2x.tiff */ = {isa = PBXFileReference; lastKnownFileType = image.tiff; path = "Bopomofo@2x.tiff"; sourceTree = "<group>"; };
 		6A0D4EF515FC0DA600ABF4B3 /* McBopomofo-Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = "McBopomofo-Info.plist"; sourceTree = "<group>"; };
@@ -316,7 +316,7 @@
 		6A0D4EA315FC0D2D00ABF4B3 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				6A0D4EA215FC0D2D00ABF4B3 /* McBopomofo.app */,
+				6A0D4EA215FC0D2D00ABF4B3 /* Smai.app */,
 				6ACA41CB15FC1D7500935EF6 /* McBopomofoInstaller.app */,
 				D485D3B62796A8A000657FF3 /* McBopomofoTests.xctest */,
 			);
@@ -583,8 +583,8 @@
 				D48F853D2EACDB6C00C2FDAB /* RomanNumbers */,
 				D40EFFA12EB669F900C1728A /* InfoCollector */,
 			);
-			productName = McBopomofo;
-			productReference = 6A0D4EA215FC0D2D00ABF4B3 /* McBopomofo.app */;
+			productName = Smai;
+			productReference = 6A0D4EA215FC0D2D00ABF4B3 /* Smai.app */;
 			productType = "com.apple.product-type.application";
 		};
 		6ACA41CA15FC1D7500935EF6 /* McBopomofoInstaller */ = {
@@ -708,7 +708,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				6ACA420215FC1E5200935EF6 /* McBopomofo.app in Resources */,
+				6ACA420215FC1E5200935EF6 /* Smai.app in Resources */,
 				6A2E40F9253A6AA000D1AE1D /* Images.xcassets in Resources */,
 				6ACA41FA15FC1D9000935EF6 /* InfoPlist.strings in Resources */,
 				6ACA41FB15FC1D9000935EF6 /* License.rtf in Resources */,
@@ -1108,7 +1108,7 @@
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = org.orin.inputmethod.Smai;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = Smai;
 				SDKROOT = macosx;
 				SWIFT_OBJC_BRIDGING_HEADER = "Source/McBopomofo-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
@@ -1162,7 +1162,7 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				PRODUCT_BUNDLE_IDENTIFIER = org.orin.inputmethod.Smai;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = Smai;
 				SDKROOT = macosx;
 				SWIFT_OBJC_BRIDGING_HEADER = "Source/McBopomofo-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
@@ -1365,7 +1365,7 @@
 				SWIFT_OBJC_BRIDGING_HEADER = "McBopomofoTests/McBopomofoTests-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/McBopomofo.app/Contents/MacOS/McBopomofo";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Smai.app/Contents/MacOS/Smai";
 			};
 			name = Debug;
 		};
@@ -1411,7 +1411,7 @@
 				SWIFT_OBJC_BRIDGING_HEADER = "McBopomofoTests/McBopomofoTests-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/McBopomofo.app/Contents/MacOS/McBopomofo";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Smai.app/Contents/MacOS/Smai";
 			};
 			name = Release;
 		};

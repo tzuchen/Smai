@@ -23,7 +23,7 @@
 
 import Testing
 
-@testable import McBopomofo
+@testable import Smai
 
 @Suite("Dictionary Service Tests")
 final class DictionaryServiceTests {
