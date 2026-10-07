@@ -533,9 +533,12 @@ class McBopomofoInputMethodController: IMKInputController {
             return
         }
         if let inputting = state as? InputState.Inputting {
-            commit(text: inputting.composingBuffer, client: client)
+            let text = inputting.composingBuffer
             keyHandler.clear()
-            handle(state: InputState.Empty(), client: client)
+            if let client = client as? IMKTextInput {
+                commit(text: text, client: client)
+            }
+            handle(state: InputState.EmptyIgnoringPreviousState(), client: client)
             return
         }
         keyHandler.handleForceCommit(stateCallback: { newState in
@@ -661,6 +664,20 @@ class McBopomofoInputMethodController: IMKInputController {
                     || NSEvent.modifierFlags.contains(.capsLock)
                     || CGEventSource.flagsState(.combinedSessionState).contains(.maskAlphaShift)
                 _ = Self.capsLockSwitch.handleCapsLock(isOn: isCaps, timestamp: event.timestamp)
+
+                let isCapsActive = isCaps || Self.capsLockSwitch.isFallbackEnglish
+                if isCapsActive {
+                    if slashTracker.isActive {
+                        let text = slashTracker.buffer
+                        slashTracker.reset()
+                        resetSlashMarkedText(client: client)
+                        if let client = client as? IMKTextInput {
+                            commit(text: text, client: client)
+                        }
+                    } else if state is InputState.NotEmpty {
+                        self.commitComposition(client)
+                    }
+                }
             }
 
             if Preferences.switchInputSourceUponCommandKeyPressEnabled,
@@ -765,8 +782,6 @@ class McBopomofoInputMethodController: IMKInputController {
                 if let client = client as? IMKTextInput {
                     if state is InputState.NotEmpty {
                         self.commitComposition(client)
-                        keyHandler.clear()
-                        self.handle(state: InputState.Empty(), client: client)
                     }
                     AFMDevLogger.shared.log("OPTION SYMBOL COMMITTED: '\(optionSymbol)'")
                     self.commit(text: optionSymbol, client: client)
@@ -786,8 +801,6 @@ class McBopomofoInputMethodController: IMKInputController {
                        let letter = Self.casePolicy.letterToCommit(text: chars, flags: event.modifierFlags) {
                         if state is InputState.NotEmpty {
                             self.commitComposition(client)
-                            keyHandler.clear()
-                            self.handle(state: InputState.Empty(), client: client)
                         }
                         AFMDevLogger.shared.log("CAPS COMMITTED (LETTER): orig='\(chars)' -> '\(letter)'")
                         self.commit(text: letter, client: client)
@@ -797,8 +810,6 @@ class McBopomofoInputMethodController: IMKInputController {
                     if let client = client as? IMKTextInput {
                         if state is InputState.NotEmpty {
                             self.commitComposition(client)
-                            keyHandler.clear()
-                            self.handle(state: InputState.Empty(), client: client)
                         }
                         AFMDevLogger.shared.log("CAPS COMMITTED (SYMBOL/DIGIT): '\(nonLetter)'")
                         self.commit(text: nonLetter, client: client)
@@ -818,8 +829,6 @@ class McBopomofoInputMethodController: IMKInputController {
                        let letter = Self.casePolicy.letterToCommit(text: chars, flags: event.modifierFlags) {
                         if state is InputState.NotEmpty {
                             self.commitComposition(client)
-                            keyHandler.clear()
-                            self.handle(state: InputState.Empty(), client: client)
                         }
                         self.commit(text: letter, client: client)
                         return true
