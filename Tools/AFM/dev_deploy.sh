@@ -18,6 +18,7 @@ deploy() {
     xcodebuild -project McBopomofo.xcodeproj \
                -scheme McBopomofo \
                -configuration Debug \
+               -derivedDataPath .build/xcode \
                -destination 'platform=macOS,arch=arm64' \
                build \
                CODE_SIGN_IDENTITY="" \
