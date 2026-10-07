@@ -509,6 +509,12 @@ class McBopomofoInputMethodController: IMKInputController {
                 keyCode: event.keyCode,
                 shiftIsOn: event.modifierFlags.contains(.shift)
             )
+            if event.keyCode == UInt16(kVK_CapsLock) {
+                let isCaps = event.modifierFlags.contains(.capsLock)
+                    || NSEvent.modifierFlags.contains(.capsLock)
+                    || CGEventSource.flagsState(.combinedSessionState).contains(.maskAlphaShift)
+                _ = Self.capsLockSwitch.handleCapsLock(isOn: isCaps, timestamp: event.timestamp)
+            }
 
             if Preferences.switchInputSourceUponCommandKeyPressEnabled,
                (event.keyCode == UInt16(kVK_Command) || event.keyCode == UInt16(kVK_RightCommand)),
@@ -563,20 +569,30 @@ class McBopomofoInputMethodController: IMKInputController {
             ].compactMap { $0 }.joined(separator: "|")
             AFMDevLogger.shared.log("KEY DOWN keyCode=\(event.keyCode), chars='\(chars)', charsNoMod='\(charsNoMod)', flags=[\(flagsStr)]")
 
-            if event.modifierFlags.contains(.capsLock) {
+            let isCapsActive = event.modifierFlags.contains(.capsLock)
+                || NSEvent.modifierFlags.contains(.capsLock)
+                || CGEventSource.flagsState(.combinedSessionState).contains(.maskAlphaShift)
+                || Self.capsLockSwitch.isFallbackEnglish
+
+            let isLetter = (chars.utf16.count == 1) && {
+                guard let scalar = chars.unicodeScalars.first,
+                      !event.modifierFlags.contains(.command),
+                      !event.modifierFlags.contains(.control),
+                      !event.modifierFlags.contains(.option) else { return false }
+                let v = scalar.value
+                return (v >= 0x41 && v <= 0x5A) || (v >= 0x61 && v <= 0x7A)
+            }()
+            let isUpper = isLetter && (chars.unicodeScalars.first!.value <= 0x5A)
+
+            if isLetter && (isCapsActive || (isUpper && !Self.casePolicy.physicalShiftIsDown)) {
                 if let client = client as? IMKTextInput,
-                   let scalar = chars.unicodeScalars.first,
-                   chars.utf16.count == 1,
-                   !event.modifierFlags.contains(.command),
-                   !event.modifierFlags.contains(.control),
-                   !event.modifierFlags.contains(.option),
-                   (scalar.value >= 0x41 && scalar.value <= 0x5A) || (scalar.value >= 0x61 && scalar.value <= 0x7A) {
+                   let letter = Self.casePolicy.letterToCommit(text: chars, flags: event.modifierFlags) {
                     if state is InputState.NotEmpty {
                         self.commitComposition(client)
                         keyHandler.clear()
                         self.handle(state: InputState.Empty(), client: client)
                     }
-                    let letter = Self.casePolicy.physicalShiftIsDown ? chars.uppercased() : chars.lowercased()
+                    AFMDevLogger.shared.log("CAPS COMMITTED: orig='\(chars)', flags=[\(flagsStr)], physShift=\(Self.casePolicy.physicalShiftIsDown) -> '\(letter)'")
                     self.commit(text: letter, client: client)
                     return true
                 }
@@ -1004,41 +1020,72 @@ extension McBopomofoInputMethodController {
             return
         }
 
-        // Check if preceding text in the client document already has >>, 》》, or 。。
-        let clientPrecedingRange: NSRange? = {
+        // Check if preceding text in the client document should be included for prompt optimization
+        struct PrecedingPromptContext {
+            let prefixText: String
+            let replaceRange: NSRange
+        }
+
+        let precedingContext: PrecedingPromptContext? = {
             guard Preferences.afmPromptOptimizerEnabled else { return nil }
-            if sentence.hasPrefix(">>") || sentence.hasPrefix("》》") || sentence.hasPrefix("。。") {
-                return nil
-            }
             let marked = client.markedRange()
             let sel = client.selectedRange()
             let startLoc = (marked.location != NSNotFound) ? marked.location : sel.location
-            guard startLoc != NSNotFound && startLoc >= 2 else { return nil }
+            guard startLoc != NSNotFound && startLoc > 0 else { return nil }
 
-            let checkLen = min(startLoc, 16)
+            let checkLen = min(startLoc, 120)
             let searchRange = NSRange(location: startLoc - checkLen, length: checkLen)
             guard let attr = client.attributedSubstring(from: searchRange) else { return nil }
             let precedingText = attr.string
+            guard !precedingText.isEmpty else { return nil }
 
             let triggers = [">>", "》》", "。。"]
+
+            // Case 1: Preceding document text contains an explicit trigger prefix (e.g. ">> " or "。。")
             for trigger in triggers {
-                if let range = precedingText.range(of: trigger, options: .backwards) {
-                    let suffix = precedingText[range.upperBound...]
-                    if suffix.allSatisfy({ $0.isWhitespace }) {
-                        let nsPreceding = precedingText as NSString
-                        let triggerNSRange = nsPreceding.range(of: trigger, options: .backwards)
-                        if triggerNSRange.location != NSNotFound {
-                            let replaceLen = checkLen - triggerNSRange.location
-                            return NSRange(location: startLoc - replaceLen, length: replaceLen)
-                        }
+                if precedingText.contains(trigger) {
+                    let nsPreceding = precedingText as NSString
+                    let triggerNSRange = nsPreceding.range(of: trigger, options: .backwards)
+                    if triggerNSRange.location != NSNotFound {
+                        let replaceLen = checkLen - triggerNSRange.location
+                        let textSlice = (nsPreceding.substring(from: triggerNSRange.location) as String)
+                        return PrecedingPromptContext(
+                            prefixText: textSlice,
+                            replaceRange: NSRange(location: startLoc - replaceLen, length: replaceLen)
+                        )
                     }
                 }
             }
+
+            // Case 2: Composing buffer has prompt optimization suffix/prefix (e.g. "。。" or ">>")
+            // In this case, capture preceding text up to the start of the current sentence/line
+            let isComposingTriggered = sentence.hasSuffix("。。") || sentence.hasSuffix(">>") || sentence.hasSuffix("》》")
+                || sentence.hasPrefix(">>") || sentence.hasPrefix("》》") || sentence.hasPrefix("。。")
+
+            if isComposingTriggered {
+                // Scan backwards for sentence/paragraph boundaries
+                var boundaryIndex = precedingText.startIndex
+                let delimiters: [Character] = ["\n", "\r", "。", "！", "？", "!", "?"]
+                if let lastDelim = precedingText.lastIndex(where: { delimiters.contains($0) }) {
+                    boundaryIndex = precedingText.index(after: lastDelim)
+                }
+
+                let textSlice = String(precedingText[boundaryIndex...])
+                if !textSlice.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    let sliceLen = (textSlice as NSString).length
+                    return PrecedingPromptContext(
+                        prefixText: textSlice,
+                        replaceRange: NSRange(location: startLoc - sliceLen, length: sliceLen)
+                    )
+                }
+            }
+
             return nil
         }()
 
-        if clientPrecedingRange != nil {
-            sentence = ">> " + sentence
+        let clientPrecedingRange = precedingContext?.replaceRange
+        if let context = precedingContext {
+            sentence = context.prefixText + sentence
         }
 
         let capturedInputting = inputting
@@ -1064,7 +1111,8 @@ extension McBopomofoInputMethodController {
             }
 
             // Visual feedback: While AFM is running, turn the entire composing buffer Indigo!
-            capturedInputting.afmPendingRange = NSRange(location: 0, length: (sentence as NSString).length)
+            let markLen = (capturedInputting.composingBuffer as NSString).length
+            capturedInputting.afmPendingRange = NSRange(location: 0, length: markLen)
             capturedClient.setMarkedText(
                 capturedInputting.attributedString,
                 selectionRange: NSMakeRange(Int(capturedInputting.cursorIndex), 0),

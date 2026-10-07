@@ -38,7 +38,7 @@ deploy() {
 
     echo "🔄 [3/4] 重啟思脈注音進程..."
     killall McBopomofo 2>/dev/null || true
-    open "$TARGET_APP"
+    open "$TARGET_APP" 2>/dev/null || true
 
     END_TIME=$(python3 -c 'import time; print(time.time())')
     ELAPSED=$(python3 -c "print(f'{$END_TIME - $START_TIME:.2f}')")
