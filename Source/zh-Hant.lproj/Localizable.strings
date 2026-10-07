@@ -259,12 +259,19 @@
 
 "Quick Text Transform" = "日韓多語拼音轉換";
 
-"AI-Assisted Candidate Selection" = "AI 智慧整句輔助";
-"AI-Assisted Candidate Selection:" = "AI 智慧整句輔助：";
-"Enable AI Assistance" = "啟用 AI 智慧輔助";
-"Punctuation Correction" = "標點符號修正";
-"Near-Homophone & Tone Correction" = "同音與似音錯字修正";
-"Semantic Fluency Rewrite" = "語意不通順修飾（字數不必相同）";
-"Cloze Filling (??)" = "填空選詞輔助（輸入 ?? 自動匹配）";
-"LLM Prompt Optimization (>>)" = "LLM 指令優化（以 >> 開頭）";
-"LLM Prompt Optimization (>> prefix)" = "LLM 指令優化（以 >> 開頭）";
+"AI-Assisted Candidate Selection" = "思脈 AI 智慧神經輔助";
+"AI-Assisted Candidate Selection:" = "思脈 AI 智慧神經輔助：";
+"Enable AI Assistance" = "啟用思脈神經語意校正（整句同音修復）";
+"Punctuation Correction" = "全形標點符號規範";
+"Punctuation Normalization" = "全形標點符號規範";
+"Near-Homophone & Tone Correction" = "同音與近音錯字校正";
+"Prioritizes exact homophones and prevents phonetically unrelated substitutions." = "嚴格同音優先，杜絕發音無關的自由改寫（如精準校正「地球有多圓」）。";
+"Semantic Fluency Rewrite" = "語意流暢自然潤飾（允許字數增減）";
+"Cloze Filling (??)" = "克漏字智慧填空（輸入 ??）";
+"Automatically fill in missing words when typing ?? or ？？ in a sentence." = "於句中輸入「??」或「？？」自動依語境填補最合適詞彙。";
+"LLM Prompt Optimization (>>)" = "LLM 提示詞工程最佳化（>> 或句尾 。。）";
+"LLM Prompt Optimization (>> prefix)" = "LLM 提示詞工程最佳化（>> 或句尾 。。）";
+"LLM Prompt Optimization (>> or ..)" = "LLM 提示詞工程最佳化（>> 或句尾 。。）";
+"Expand ideas into precise coding prompts with >> or trailing 。。 (supports mixed Chinese/English)." = "輸入「>>」或句尾「。。」自動重構為精準 Prompt，支援中英混打上文自動縫合。";
+"Dual-Engine: Spark Qwen 27B + On-Device AFM Edge (~3B)" = "雙引擎協同：Spark Qwen 27B 主力加速 + 本機 AFM 邊緣備援";
+

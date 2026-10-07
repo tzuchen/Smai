@@ -669,28 +669,45 @@ private struct AdvancedPreferencesView: View {
                 .padding(.vertical, 5)
 
             PreferenceRow(localized("AI-Assisted Candidate Selection:")) {
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 8) {
                     Toggle(localized("Enable AI Assistance"), isOn: $preferences.afmAssistEnabled)
 
-                    Toggle(localized("Punctuation Correction"), isOn: $preferences.afmPunctuationFixEnabled)
-                        .disabled(!preferences.afmAssistEnabled)
-                        .padding(.leading, 16)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Toggle(localized("Near-Homophone & Tone Correction"), isOn: $preferences.afmNearPhoneticFixEnabled)
+                        Text(localized("Prioritizes exact homophones and prevents phonetically unrelated substitutions."))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
 
-                    Toggle(localized("Near-Homophone & Tone Correction"), isOn: $preferences.afmNearPhoneticFixEnabled)
-                        .disabled(!preferences.afmAssistEnabled)
-                        .padding(.leading, 16)
+                        Toggle(localized("LLM Prompt Optimization (>> or ..)"), isOn: $preferences.afmPromptOptimizerEnabled)
+                        Text(localized("Expand ideas into precise coding prompts with >> or trailing 。。 (supports mixed Chinese/English)."))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
 
-                    Toggle(localized("Semantic Fluency Rewrite"), isOn: $preferences.afmSemanticFluencyRewriteEnabled)
-                        .disabled(!preferences.afmAssistEnabled)
-                        .padding(.leading, 16)
+                        Toggle(localized("Cloze Filling (??)"), isOn: $preferences.afmClozeFillingEnabled)
+                        Text(localized("Automatically fill in missing words when typing ?? or ？？ in a sentence."))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
 
-                    Toggle(localized("Cloze Filling (??)"), isOn: $preferences.afmClozeFillingEnabled)
-                        .disabled(!preferences.afmAssistEnabled)
-                        .padding(.leading, 16)
+                        Toggle(localized("Punctuation Normalization"), isOn: $preferences.afmPunctuationFixEnabled)
 
-                    Toggle(localized("LLM Prompt Optimization (>> prefix)"), isOn: $preferences.afmPromptOptimizerEnabled)
-                        .disabled(!preferences.afmAssistEnabled)
-                        .padding(.leading, 16)
+                        Toggle(localized("Semantic Fluency Rewrite"), isOn: $preferences.afmSemanticFluencyRewriteEnabled)
+                    }
+                    .disabled(!preferences.afmAssistEnabled)
+                    .padding(.leading, 16)
+
+                    HStack(spacing: 5) {
+                        Circle()
+                            .fill(preferences.afmAssistEnabled ? Color.green : Color.secondary.opacity(0.4))
+                            .frame(width: 7, height: 7)
+                        Text(localized("Dual-Engine: Spark Qwen 27B + On-Device AFM Edge (~3B)"))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.top, 2)
+                    .padding(.leading, 16)
                 }
             }
 

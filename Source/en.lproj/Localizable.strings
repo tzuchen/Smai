@@ -261,12 +261,19 @@
 
 "Quick Text Transform" = "Quick Text Transform";
 
-"AI-Assisted Candidate Selection" = "AI-Assisted Candidate Selection";
-"AI-Assisted Candidate Selection:" = "AI-Assisted Candidate Selection:";
-"Enable AI Assistance" = "Enable AI Assistance";
-"Punctuation Correction" = "Punctuation Correction";
+"AI-Assisted Candidate Selection" = "Smai Neural AI Assist";
+"AI-Assisted Candidate Selection:" = "Smai Neural AI Assist:";
+"Enable AI Assistance" = "Enable Smai Neural Correction";
+"Punctuation Correction" = "Punctuation Normalization";
+"Punctuation Normalization" = "Punctuation Normalization";
 "Near-Homophone & Tone Correction" = "Near-Homophone & Tone Correction";
+"Prioritizes exact homophones and prevents phonetically unrelated substitutions." = "Prioritizes exact homophones and prevents phonetically unrelated substitutions.";
 "Semantic Fluency Rewrite" = "Semantic Fluency Rewrite";
 "Cloze Filling (??)" = "Cloze Filling (??)";
-"LLM Prompt Optimization (>>)" = "LLM Prompt Optimization (>>)";
-"LLM Prompt Optimization (>> prefix)" = "LLM Prompt Optimization (>> prefix)";
+"Automatically fill in missing words when typing ?? or ？？ in a sentence." = "Automatically fill in missing words when typing ?? or ？？ in a sentence.";
+"LLM Prompt Optimization (>>)" = "LLM Prompt Optimization (>> or ..)";
+"LLM Prompt Optimization (>> prefix)" = "LLM Prompt Optimization (>> or ..)";
+"LLM Prompt Optimization (>> or ..)" = "LLM Prompt Optimization (>> or ..)";
+"Expand ideas into precise coding prompts with >> or trailing 。。 (supports mixed Chinese/English)." = "Expand ideas into precise coding prompts with >> or trailing 。。 (supports mixed Chinese/English).";
+"Dual-Engine: Spark Qwen 27B + On-Device AFM Edge (~3B)" = "Dual-Engine: Spark Qwen 27B + On-Device AFM Edge (~3B)";
+

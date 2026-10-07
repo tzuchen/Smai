@@ -254,7 +254,7 @@ class McBopomofoInputMethodController: IMKInputController {
             afmSubmenu.addItem(NSMenuItem.separator())
 
             let punctItem = afmSubmenu.addItem(
-                withTitle: NSLocalizedString("Punctuation Correction", comment: ""),
+                withTitle: NSLocalizedString("Punctuation Normalization", comment: ""),
                 action: #selector(toggleAFMPunctuationFix(_:)), keyEquivalent: "")
             punctItem.state = Preferences.afmPunctuationFixEnabled.state
 
@@ -274,7 +274,7 @@ class McBopomofoInputMethodController: IMKInputController {
             clozeItem.state = Preferences.afmClozeFillingEnabled.state
 
             let promptOptItem = afmSubmenu.addItem(
-                withTitle: NSLocalizedString("LLM Prompt Optimization (>>)", comment: ""),
+                withTitle: NSLocalizedString("LLM Prompt Optimization (>> or ..)", comment: ""),
                 action: #selector(toggleAFMPromptOptimizer(_:)), keyEquivalent: "")
             promptOptItem.state = Preferences.afmPromptOptimizerEnabled.state
 
