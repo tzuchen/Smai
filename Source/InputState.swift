@@ -327,6 +327,7 @@ class InputState: NSObject {
         @objc var afmPendingRange: NSRange = NSMakeRange(NSNotFound, 0)
         @objc var afmHighlightedRange: NSRange = NSMakeRange(NSNotFound, 0)
         @objc var afmHighlightedRanges: [NSValue] = []
+        @objc var afmReplacementRange: NSRange = NSMakeRange(NSNotFound, NSNotFound)
 
         @objc override init(composingBuffer: String, cursorIndex: UInt) {
             super.init(composingBuffer: composingBuffer, cursorIndex: cursorIndex)

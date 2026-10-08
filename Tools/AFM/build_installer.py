@@ -213,11 +213,50 @@ def build_package(staging_root: Path, component_plist_path: Path, output_pkg: Pa
     """
     print(f"[pkgbuild] Building package {output_pkg}")
 
+    # Prepare postinstall script to cleanly terminate old instances and relaunch Smai
+    scripts_dir = staging_root.parent / "scripts"
+    scripts_dir.mkdir(parents=True, exist_ok=True)
+    postinstall_path = scripts_dir / "postinstall"
+    postinstall_content = """#!/bin/sh
+TARGET_APP="/Library/Input Methods/Smai.app"
+TARGET_BIN="/Library/Input Methods/Smai.app/Contents/MacOS/Smai"
+
+# 1. 確保所有權限正確
+chmod -R a+rX "$TARGET_APP" 2>/dev/null || true
+
+# 2. 清除 Gatekeeper quarantine 隔離屬性
+/usr/bin/xattr -cr "$TARGET_APP" 2>/dev/null || true
+
+# 3. 強制讓 LaunchServices 註冊 Smai.app
+if [ -f "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister" ]; then
+    /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$TARGET_APP" 2>/dev/null || true
+fi
+
+# 4. 終止舊有進程
+killall -9 Smai 2>/dev/null || true
+killall -9 McBopomofo 2>/dev/null || true
+sleep 0.4
+
+# 5. 在當前 Console 登入使用者的 Aqua Session 下自動重新喚醒 Smai
+CONSOLE_USER=$(stat -f "%Su" /dev/console 2>/dev/null || echo "")
+CONSOLE_UID=$(id -u "$CONSOLE_USER" 2>/dev/null || echo "")
+
+if [ -n "$CONSOLE_USER" ] && [ "$CONSOLE_USER" != "root" ] && [ -n "$CONSOLE_UID" ] && [ "$CONSOLE_UID" -ge 500 ]; then
+    /bin/launchctl asuser "$CONSOLE_UID" sudo -u "$CONSOLE_USER" /usr/bin/open "$TARGET_APP" 2>/dev/null || \
+    /bin/launchctl asuser "$CONSOLE_UID" sudo -u "$CONSOLE_USER" nohup "$TARGET_BIN" >/dev/null 2>&1 &
+fi
+
+exit 0
+"""
+    postinstall_path.write_text(postinstall_content)
+    postinstall_path.chmod(0o755)
+
     result = subprocess.run(
         [
             "/usr/bin/pkgbuild",
             "--root", str(staging_root),
             "--component-plist", str(component_plist_path),
+            "--scripts", str(scripts_dir),
             "--identifier", EXPECTED_PKG_IDENTIFIER,
             "--version", EXPECTED_PKG_VERSION,
             "--install-location", EXPECTED_INSTALL_LOCATION,

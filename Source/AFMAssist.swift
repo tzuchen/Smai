@@ -251,10 +251,10 @@ internal struct AFMAssistClient: Sendable {
         }
     }
 
-    func correctSentence(sentence: String) async -> String? {
+    func correctSentence(sentence: String, isTerminal: Bool = false, isAiCli: Bool = false) async -> String? {
         guard sentence.count >= 2 else { return nil }
         return await AFMRequestCoordinator.shared.run {
-            await self.performCorrectSentence(sentence: sentence)
+            await self.performCorrectSentence(sentence: sentence, isTerminal: isTerminal, isAiCli: isAiCli)
         }
     }
 
@@ -331,6 +331,7 @@ internal struct AFMAssistClient: Sendable {
             rules.append("- 校正後字數必須與原句完全一致（一字對一字替換）。")
         }
 
+        rules.append("- 特別專有名詞：本輸入法名稱為「思脈注音」（亦稱「思脈」，讀音為 ㄙ ㄇㄞˋ ㄓㄨˋ ㄧㄣ），若使用者輸入同音或近音字（如「斯麥注音」、「私脈」等）時，應優先校正為「思脈注音」或「思脈」。")
         rules.append("- 僅修正錯誤，正確文字保持原樣。")
         rules.append("- 直接輸出校正後的整句結果，不要添加任何引號、拼音或多餘解釋。")
 
@@ -344,13 +345,13 @@ internal struct AFMAssistClient: Sendable {
         """
     }
 
-    private func performCorrectSentence(sentence: String) async -> String? {
+    private func performCorrectSentence(sentence: String, isTerminal: Bool = false, isAiCli: Bool = false) async -> String? {
         // 1. Try Qwen endpoints (supports LAN, Tailscale, or custom URL)
         let qwenCandidates = AFMEndpointResolver.shared.qwenEndpoints()
         for endpoint in qwenCandidates {
             try? Task.checkCancellation()
             if Task.isCancelled { return nil }
-            if let result = await performCorrectSentenceWithEndpoint(sentence: sentence, endpoint: endpoint, isQwen: true) {
+            if let result = await performCorrectSentenceWithEndpoint(sentence: sentence, endpoint: endpoint, isQwen: true, isTerminal: isTerminal, isAiCli: isAiCli) {
                 AFMEndpointResolver.shared.markQwenSuccess(url: endpoint)
                 return result
             } else {
@@ -364,14 +365,80 @@ internal struct AFMAssistClient: Sendable {
         for endpoint in afmCandidates {
             try? Task.checkCancellation()
             if Task.isCancelled { return nil }
-            if let result = await performCorrectSentenceWithEndpoint(sentence: sentence, endpoint: endpoint, isQwen: false) {
+            if let result = await performCorrectSentenceWithEndpoint(sentence: sentence, endpoint: endpoint, isQwen: false, isTerminal: isTerminal, isAiCli: isAiCli) {
                 return result
             }
         }
         return nil
     }
 
-    private func performCorrectSentenceWithEndpoint(sentence: String, endpoint: String, isQwen: Bool) async -> String? {
+    private static func parseAndProtectShellCommand(rawReply: String) -> String? {
+        var command = ""
+        var safety = "SAFE"
+        for line in rawReply.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.hasPrefix("COMMAND:") {
+                command = String(trimmed.dropFirst("COMMAND:".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            } else if trimmed.hasPrefix("SAFETY:") {
+                let sVal = String(trimmed.dropFirst("SAFETY:".count)).trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                if sVal.contains("DANGER") {
+                    safety = "DANGER"
+                }
+            }
+        }
+
+        if command.isEmpty {
+            let nonEmpties = rawReply.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+            if let first = nonEmpties.first {
+                command = first
+            }
+        }
+
+        if command.hasPrefix("```") {
+            command = command.replacingOccurrences(of: "^```[a-zA-Z]*\\n?", with: "", options: .regularExpression)
+        }
+        if command.hasSuffix("```") {
+            command = command.replacingOccurrences(of: "\\n?```$", with: "", options: .regularExpression)
+        }
+        command = command.trimmingCharacters(in: CharacterSet(charactersIn: "`\"' \n\t"))
+
+        guard !command.isEmpty else { return nil }
+
+        // Deterministic Safety Guardrails (Rule-based overrides for dangerous operations)
+        let dangerPatterns = [
+            #"\brm\s+(-[a-zA-Z]*r[a-zA-Z]*f|[a-zA-Z]*f[a-zA-Z]*r)"#, // rm -rf / rm -fr
+            #"\brm\s+(-r|-R|--recursive)"#,
+            #"\brm\s+"#,
+            #"\brmdir\s+"#,
+            #"\bgit\s+reset\s+--hard\b"#,
+            #"\bgit\s+clean\s+-[a-zA-Z]*f"#,
+            #"\bkill\s+-9\b"#,
+            #"\bkillall\s+-9\b"#,
+            #"\bdd\s+if="#,
+            #"\bmkfs\b"#,
+            #"\bdiskutil\s+(erase|partitionDisk)\b"#,
+            #"\bsudo\b"#,
+            #">\s*/dev/"#
+        ]
+
+        var isDanger = (safety == "DANGER")
+        if !isDanger {
+            for pat in dangerPatterns {
+                if command.range(of: pat, options: .regularExpression) != nil {
+                    isDanger = true
+                    break
+                }
+            }
+        }
+
+        if isDanger {
+            command = "# ⚠️ [危險指令確認] " + command
+        }
+
+        return command
+    }
+
+    private func performCorrectSentenceWithEndpoint(sentence: String, endpoint: String, isQwen: Bool, isTerminal: Bool = false, isAiCli: Bool = false) async -> String? {
         let startTime = Date()
         do {
             try Task.checkCancellation()
@@ -383,12 +450,22 @@ internal struct AFMAssistClient: Sendable {
 
             var request = URLRequest(url: url)
             request.httpMethod = "POST"
-            let isPromptOptimization = (
-                sentence.hasPrefix(">>") || sentence.hasPrefix("》》") || sentence.hasPrefix("。。") ||
-                sentence.hasSuffix(">>") || sentence.hasSuffix("》》") || sentence.hasSuffix("。。")
-            ) && Preferences.afmPromptOptimizerEnabled
+            let trimmedSentence = sentence.trimmingCharacters(in: .whitespacesAndNewlines)
+            let isExplicitShell = (
+                trimmedSentence.hasPrefix("$$") || trimmedSentence.hasSuffix("$$")
+            )
+            let isPromptTrigger = (
+                trimmedSentence.hasPrefix(">>") || trimmedSentence.hasPrefix("》》") || trimmedSentence.hasPrefix("。。") || trimmedSentence.hasPrefix("..") ||
+                trimmedSentence.hasSuffix(">>") || trimmedSentence.hasSuffix("》》") || trimmedSentence.hasSuffix("。。") || trimmedSentence.hasSuffix("..")
+            )
+            // If in terminal, BUT an AI CLI (agy / codex / claude) is running in the foreground, do NOT hijack into shell command!
+            let isShellCommand = (isExplicitShell || (isTerminal && !isAiCli && isPromptTrigger)) && Preferences.afmPromptOptimizerEnabled
+            let isPromptOptimization = (!isShellCommand && isPromptTrigger) && Preferences.afmPromptOptimizerEnabled
+
+            AFMDevLogger.shared.log("TRIGGER EVAL: isExplicitShell=\(isExplicitShell), isPromptTrigger=\(isPromptTrigger), isTerminal=\(isTerminal), isAiCli=\(isAiCli) -> isShell=\(isShellCommand), isPromptOpt=\(isPromptOptimization)")
+
             let isCachedWorking = (endpoint == AFMEndpointResolver.shared.cachedWorkingURL)
-            request.timeoutInterval = isPromptOptimization ? 10.0 : (isCachedWorking ? 2.5 : 1.5)
+            request.timeoutInterval = (isPromptOptimization || isShellCommand) ? 10.0 : (isCachedWorking ? 2.5 : 1.5)
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
             var allowsLengthChange = false
@@ -396,16 +473,56 @@ internal struct AFMAssistClient: Sendable {
             let sysPrompt: String
             let userPrompt: String
 
-            if isPromptOptimization {
+            if isShellCommand {
                 allowsLengthChange = true
-                var cleanDemand = sentence
-                if cleanDemand.hasPrefix(">>") || cleanDemand.hasPrefix("》》") || cleanDemand.hasPrefix("。。") {
-                    cleanDemand = String(cleanDemand.dropFirst(2))
+                var cleanDemand = trimmedSentence
+                for trig in ["$$", ">>", "》》", "。。", ".."] {
+                    if cleanDemand.hasPrefix(trig) {
+                        cleanDemand = String(cleanDemand.dropFirst(trig.count))
+                    }
+                    if cleanDemand.hasSuffix(trig) {
+                        cleanDemand = String(cleanDemand.dropLast(trig.count))
+                    }
                 }
-                if cleanDemand.hasSuffix(">>") || cleanDemand.hasSuffix("》》") || cleanDemand.hasSuffix("。。") {
-                    cleanDemand = String(cleanDemand.dropLast(2))
+                let punctChars = CharacterSet(charactersIn: "。，,.!！?？:：;；")
+                let promptChars = CharacterSet(charactersIn: ">›》#$ %")
+                cleanDemand = cleanDemand.trimmingCharacters(in: .whitespacesAndNewlines.union(punctChars).union(promptChars))
+                guard cleanDemand.count >= 2 else {
+                    AFMDevLogger.shared.log("SHELL-CMD SKIPPED: demand too short: '\(cleanDemand)'")
+                    return nil
                 }
-                cleanDemand = cleanDemand.trimmingCharacters(in: .whitespacesAndNewlines)
+
+                sysPrompt = """
+                你是 macOS zsh 命令專家。請將使用者的中文需求轉換為單行可直接執行的 macOS zsh shell 命令或 pipeline。
+
+                環境：
+                OS: macOS (Darwin, BSD userland)
+                Shell: zsh
+
+                輸出格式規範：
+                COMMAND: <單行可執行的 zsh 命令>
+                SAFETY: <SAFE 或 DANGER>
+
+                規則：
+                1. 僅使用 macOS 內建或常用指令（如 lsof, find, grep, ps, wc, du, mdfind, pbcopy, pbpaste）。
+                2. 若為破壞性、不可逆之操作（如刪除檔案 rm、強制中止 kill -9、git 重置 reset --hard、格式化磁碟 diskutil/dd、管理者權限 sudo），SAFETY 必須為 DANGER，其餘檢視或安全操作為 SAFE。
+                3. 嚴禁任何 Markdown 程式碼區塊（無 ```）、嚴禁引號、註解或多餘客套解釋。
+                """
+                userPrompt = "需求：\(cleanDemand)\nCOMMAND："
+            } else if isPromptOptimization {
+                allowsLengthChange = true
+                var cleanDemand = trimmedSentence
+                for trig in [">>", "》》", "。。", ".."] {
+                    if cleanDemand.hasPrefix(trig) {
+                        cleanDemand = String(cleanDemand.dropFirst(trig.count))
+                    }
+                    if cleanDemand.hasSuffix(trig) {
+                        cleanDemand = String(cleanDemand.dropLast(trig.count))
+                    }
+                }
+                let punctChars = CharacterSet(charactersIn: "。，,.!！?？:：;；")
+                let promptChars = CharacterSet(charactersIn: ">›》#$ %")
+                cleanDemand = cleanDemand.trimmingCharacters(in: .whitespacesAndNewlines.union(punctChars).union(promptChars))
                 guard cleanDemand.count >= 2 else {
                     AFMDevLogger.shared.log("PROMPT-OPT SKIPPED: demand too short: '\(cleanDemand)'")
                     return nil
@@ -433,8 +550,8 @@ internal struct AFMAssistClient: Sendable {
 
             var body: [String: Any] = [
                 "model": isQwen ? "spark-vllm-docker" : "system",
-                "temperature": isPromptOptimization ? 0.1 : 0.0,
-                "max_tokens": isPromptOptimization ? 100 : 128,
+                "temperature": (isPromptOptimization || isShellCommand) ? 0.1 : 0.0,
+                "max_tokens": (isPromptOptimization || isShellCommand) ? 100 : 128,
                 "stream": false,
                 "messages": [
                     ["role": "system", "content": sysPrompt],
@@ -448,7 +565,7 @@ internal struct AFMAssistClient: Sendable {
             }
 
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
-            let tag = isPromptOptimization ? "PROMPT-OPT" : (isQwen ? "QWEN" : "AFM")
+            let tag = isShellCommand ? "SHELL" : (isPromptOptimization ? "PROMPT-OPT" : (isQwen ? "QWEN" : "AFM"))
             AFMDevLogger.shared.log("WHOLE-SENTENCE (\(tag)) REQUEST [\(endpoint)]: '\(sentence)'")
 
             let (data, response) = try await session.data(for: request)
@@ -468,14 +585,23 @@ internal struct AFMAssistClient: Sendable {
                 return nil
             }
 
-            let cleaned = Self.cleanCorrectedSentence(rawReply, original: sentence)
+            let cleaned: String
+            if isShellCommand {
+                guard let shellCmd = Self.parseAndProtectShellCommand(rawReply: rawReply) else {
+                    AFMDevLogger.shared.log("WHOLE-SENTENCE (\(tag)) COULD NOT PARSE COMMAND in \(elapsedMs)ms [\(endpoint)]: '\(rawReply)'")
+                    return nil
+                }
+                cleaned = shellCmd
+            } else {
+                cleaned = Self.cleanCorrectedSentence(rawReply, original: sentence)
+            }
             AFMDevLogger.shared.log("WHOLE-SENTENCE (\(tag)) REPLY in \(elapsedMs)ms [\(endpoint)]: '\(cleaned)'")
 
             let origLen = (sentence as NSString).length
             let newLen = (cleaned as NSString).length
 
             if allowsLengthChange {
-                let maxLen = isPromptOptimization ? max(origLen + 150, 300) : (origLen + 50)
+                let maxLen = (isPromptOptimization || isShellCommand) ? max(origLen + 200, 400) : (origLen + 50)
                 guard newLen >= 1, newLen <= maxLen else {
                     AFMDevLogger.shared.log("WHOLE-SENTENCE (\(tag)) LENGTH OUT OF BOUNDS orig=\(origLen), new=\(newLen): '\(cleaned)'")
                     return nil

@@ -275,3 +275,4 @@
 "Expand ideas into precise coding prompts with >> or trailing 。。 (supports mixed Chinese/English)." = "輸入「>>」或句尾「。。」自動重構為精準 Prompt，支援中英混打上文自動縫合。";
 "Dual-Engine: Spark Qwen 27B + On-Device AFM Edge (~3B)" = "雙引擎協同：Spark Qwen 27B 主力加速 + 本機 AFM 邊緣備援";
 
+"Restart Smai" = "重啟思脈注音";

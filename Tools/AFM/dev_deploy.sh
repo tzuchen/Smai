@@ -37,9 +37,10 @@ deploy() {
     fi
 
     echo "🔄 [3/4] 重啟思脈注音進程..."
-    killall Smai 2>/dev/null || true
-    killall McBopomofo 2>/dev/null || true
-    open "$TARGET_APP" 2>/dev/null || true
+    killall -9 Smai 2>/dev/null || true
+    killall -9 McBopomofo 2>/dev/null || true
+    sleep 0.3
+    open "$TARGET_APP" 2>/dev/null || nohup "$TARGET_APP/Contents/MacOS/Smai" >/dev/null 2>&1 &
 
     END_TIME=$(python3 -c 'import time; print(time.time())')
     ELAPSED=$(python3 -c "print(f'{$END_TIME - $START_TIME:.2f}')")

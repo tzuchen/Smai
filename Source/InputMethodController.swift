@@ -42,15 +42,17 @@ private let kMinKeyLabelSize: CGFloat = 10
 
 struct AFMTriggerPolicy {
     static func delayNanoseconds(for text: String) -> UInt64 {
-        let isPromptOpt = text.hasPrefix(">>") || text.hasPrefix("》》") || text.hasPrefix("。。")
-            || text.hasSuffix(">>") || text.hasSuffix("》》") || text.hasSuffix("。。")
+        let isPromptOpt = text.hasPrefix(">>") || text.hasPrefix("》》") || text.hasPrefix("。。") || text.hasPrefix("..") || text.hasPrefix("$$")
+            || text.hasSuffix(">>") || text.hasSuffix("》》") || text.hasSuffix("。。") || text.hasSuffix("..") || text.hasSuffix("$$")
         if isPromptOpt {
             var clean = text
-            if clean.hasPrefix(">>") || clean.hasPrefix("》》") || clean.hasPrefix("。。") {
-                clean = String(clean.dropFirst(2))
-            }
-            if clean.hasSuffix(">>") || clean.hasSuffix("》》") || clean.hasSuffix("。。") {
-                clean = String(clean.dropLast(2))
+            for trig in [">>", "》》", "。。", "..", "$$"] {
+                if clean.hasPrefix(trig) {
+                    clean = String(clean.dropFirst(trig.count))
+                }
+                if clean.hasSuffix(trig) {
+                    clean = String(clean.dropLast(trig.count))
+                }
             }
             clean = clean.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -59,7 +61,7 @@ struct AFMTriggerPolicy {
                 return 600_000_000
             }
 
-            if text.hasSuffix(">>") || text.hasSuffix("》》") || text.hasSuffix("。。") {
+            if text.hasSuffix(">>") || text.hasSuffix("》》") || text.hasSuffix("。。") || text.hasSuffix("..") || text.hasSuffix("$$") {
                 return 0
             }
             if let lastChar = text.last {
@@ -98,6 +100,12 @@ struct AFMCapsLockSwitch {
     mutating func observeNativeCapsOn() {
         nativeCapsOn = true
         isFallbackEnglish = false
+        lastZeroCapsTimestamp = nil
+    }
+
+    mutating func reset() {
+        isFallbackEnglish = false
+        nativeCapsOn = false
         lastZeroCapsTimestamp = nil
     }
 
@@ -370,45 +378,47 @@ class McBopomofoInputMethodController: IMKInputController {
         }
 
         if inputMode == .bopomofo {
-            let afmAssistItem = menu.addItem(
-                withTitle: NSLocalizedString("AI-Assisted Candidate Selection", comment: ""),
-                action: #selector(toggleAFMAssist(_:)), keyEquivalent: "")
-            afmAssistItem.state = Preferences.afmAssistEnabled.state
+            let afmAssistItem = NSMenuItem(
+                title: NSLocalizedString("AI-Assisted Candidate Selection", comment: ""),
+                action: nil,
+                keyEquivalent: "")
+            afmAssistItem.isEnabled = true
 
             let afmSubmenu = NSMenu(title: "AI Assist")
-            let masterItem = afmSubmenu.addItem(
-                withTitle: NSLocalizedString("Enable AI Assistance", comment: ""),
-                action: #selector(toggleAFMAssist(_:)), keyEquivalent: "")
-            masterItem.state = Preferences.afmAssistEnabled.state
-
-            afmSubmenu.addItem(NSMenuItem.separator())
+            afmSubmenu.autoenablesItems = false
 
             let punctItem = afmSubmenu.addItem(
                 withTitle: NSLocalizedString("Punctuation Normalization", comment: ""),
                 action: #selector(toggleAFMPunctuationFix(_:)), keyEquivalent: "")
+            punctItem.target = self
             punctItem.state = Preferences.afmPunctuationFixEnabled.state
 
             let phoneticItem = afmSubmenu.addItem(
                 withTitle: NSLocalizedString("Near-Homophone & Tone Correction", comment: ""),
                 action: #selector(toggleAFMNearPhoneticFix(_:)), keyEquivalent: "")
+            phoneticItem.target = self
             phoneticItem.state = Preferences.afmNearPhoneticFixEnabled.state
 
             let fluencyItem = afmSubmenu.addItem(
                 withTitle: NSLocalizedString("Semantic Fluency Rewrite", comment: ""),
                 action: #selector(toggleAFMSemanticFluencyRewrite(_:)), keyEquivalent: "")
+            fluencyItem.target = self
             fluencyItem.state = Preferences.afmSemanticFluencyRewriteEnabled.state
 
             let clozeItem = afmSubmenu.addItem(
                 withTitle: NSLocalizedString("Cloze Filling (??)", comment: ""),
                 action: #selector(toggleAFMClozeFilling(_:)), keyEquivalent: "")
+            clozeItem.target = self
             clozeItem.state = Preferences.afmClozeFillingEnabled.state
 
             let promptOptItem = afmSubmenu.addItem(
                 withTitle: NSLocalizedString("LLM Prompt Optimization (>> or ..)", comment: ""),
                 action: #selector(toggleAFMPromptOptimizer(_:)), keyEquivalent: "")
+            promptOptItem.target = self
             promptOptItem.state = Preferences.afmPromptOptimizerEnabled.state
 
             afmAssistItem.submenu = afmSubmenu
+            menu.addItem(afmAssistItem)
         }
 
         menu.addItem(NSMenuItem.separator())
@@ -458,6 +468,9 @@ class McBopomofoInputMethodController: IMKInputController {
             withTitle: NSLocalizedString("McBopomofo Preferences", comment: ""),
             action: #selector(showPreferences(_:)), keyEquivalent: "")
         menu.addItem(
+            withTitle: NSLocalizedString("Restart Smai", comment: ""),
+            action: #selector(restartSmai(_:)), keyEquivalent: "")
+        menu.addItem(
             withTitle: NSLocalizedString("Check for Updates…", comment: ""),
             action: #selector(checkForUpdate(_:)), keyEquivalent: "")
         menu.addItem(
@@ -480,6 +493,9 @@ class McBopomofoInputMethodController: IMKInputController {
 
         keyHandler.clear()
         keyHandler.syncWithPreferences()
+        slashTracker.reset()
+        Self.capsLockSwitch.reset()
+        Self.casePolicy.resetShiftTracking()
 
         (NSApp.delegate as? AppDelegate)?.checkForUpdate()
     }
@@ -496,6 +512,8 @@ class McBopomofoInputMethodController: IMKInputController {
         }
         currentClient = nil
         keyHandler.clear()
+        slashTracker.reset()
+        Self.capsLockSwitch.reset()
         Self.casePolicy.resetShiftTracking()
         self.handle(state: .Deactivated(), client: client)
     }
@@ -660,24 +678,22 @@ class McBopomofoInputMethodController: IMKInputController {
                 shiftIsOn: event.modifierFlags.contains(.shift)
             )
             if event.keyCode == UInt16(kVK_CapsLock) {
+                // If there is pending composition when user touches CapsLock, commit it immediately
+                if slashTracker.isActive {
+                    let text = slashTracker.buffer
+                    slashTracker.reset()
+                    resetSlashMarkedText(client: client)
+                    if let client = client as? IMKTextInput {
+                        commit(text: text, client: client)
+                    }
+                } else if state is InputState.NotEmpty {
+                    self.commitComposition(client)
+                }
+
                 let isCaps = event.modifierFlags.contains(.capsLock)
                     || NSEvent.modifierFlags.contains(.capsLock)
                     || CGEventSource.flagsState(.combinedSessionState).contains(.maskAlphaShift)
                 _ = Self.capsLockSwitch.handleCapsLock(isOn: isCaps, timestamp: event.timestamp)
-
-                let isCapsActive = isCaps || Self.capsLockSwitch.isFallbackEnglish
-                if isCapsActive {
-                    if slashTracker.isActive {
-                        let text = slashTracker.buffer
-                        slashTracker.reset()
-                        resetSlashMarkedText(client: client)
-                        if let client = client as? IMKTextInput {
-                            commit(text: text, client: client)
-                        }
-                    } else if state is InputState.NotEmpty {
-                        self.commitComposition(client)
-                    }
-                }
             }
 
             if Preferences.switchInputSourceUponCommandKeyPressEnabled,
@@ -736,7 +752,6 @@ class McBopomofoInputMethodController: IMKInputController {
             let isCapsActive = event.modifierFlags.contains(.capsLock)
                 || NSEvent.modifierFlags.contains(.capsLock)
                 || CGEventSource.flagsState(.combinedSessionState).contains(.maskAlphaShift)
-                || Self.capsLockSwitch.isFallbackEnglish
 
             let hasCmd = event.modifierFlags.contains(.command)
             let hasCtrl = event.modifierFlags.contains(.control)
@@ -1062,24 +1077,55 @@ class McBopomofoInputMethodController: IMKInputController {
         cancelAFMRequest()
     }
 
+    private func updateAFMAssistMasterState() {
+        let anySubFeature = Preferences.afmPunctuationFixEnabled
+            || Preferences.afmNearPhoneticFixEnabled
+            || Preferences.afmSemanticFluencyRewriteEnabled
+            || Preferences.afmClozeFillingEnabled
+            || Preferences.afmPromptOptimizerEnabled
+        Preferences.afmAssistEnabled = anySubFeature
+        if !anySubFeature {
+            cancelAFMRequest()
+        }
+    }
+
     @objc func toggleAFMPunctuationFix(_ sender: Any?) {
         Preferences.afmPunctuationFixEnabled = !Preferences.afmPunctuationFixEnabled
+        updateAFMAssistMasterState()
     }
 
     @objc func toggleAFMNearPhoneticFix(_ sender: Any?) {
         Preferences.afmNearPhoneticFixEnabled = !Preferences.afmNearPhoneticFixEnabled
+        updateAFMAssistMasterState()
     }
 
     @objc func toggleAFMSemanticFluencyRewrite(_ sender: Any?) {
         Preferences.afmSemanticFluencyRewriteEnabled = !Preferences.afmSemanticFluencyRewriteEnabled
+        updateAFMAssistMasterState()
     }
 
     @objc func toggleAFMClozeFilling(_ sender: Any?) {
         Preferences.afmClozeFillingEnabled = !Preferences.afmClozeFillingEnabled
+        updateAFMAssistMasterState()
     }
 
     @objc func toggleAFMPromptOptimizer(_ sender: Any?) {
         Preferences.afmPromptOptimizerEnabled = !Preferences.afmPromptOptimizerEnabled
+        updateAFMAssistMasterState()
+    }
+
+    @objc func restartSmai(_ sender: Any?) {
+        cancelAFMRequest()
+        let bundlePath = Bundle.main.bundlePath
+        let execPath = Bundle.main.executablePath ?? (bundlePath + "/Contents/MacOS/Smai")
+        let task = Process()
+        task.launchPath = "/bin/sh"
+        task.arguments = [
+            "-c",
+            "sleep 0.3; /usr/bin/open \"\(bundlePath)\" 2>/dev/null || nohup \"\(execPath)\" >/dev/null 2>&1 &"
+        ]
+        try? task.run()
+        NSApp.terminate(nil)
     }
 
     @objc func checkForUpdate(_ sender: Any?) {
@@ -1243,6 +1289,110 @@ extension McBopomofoInputMethodController {
         return false
     }
 
+    static func isTerminalApp(_ client: Any?) -> Bool {
+        var bundleID: String? = nil
+        if let textInput = client as? IMKTextInput {
+            bundleID = textInput.bundleIdentifier()
+        }
+        if bundleID == nil || bundleID?.isEmpty == true {
+            bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        }
+        guard let bid = bundleID?.lowercased() else { return false }
+        return bid.contains("terminal") ||
+               bid.contains("iterm") ||
+               bid.contains("ghostty") ||
+               bid.contains("warp") ||
+               bid.contains("wezterm") ||
+               bid.contains("kitty") ||
+               bid.contains("alacritty") ||
+               bid.contains("hyper") ||
+               bid.contains("tabby") ||
+               bid.contains("rio")
+    }
+
+    static func containsAlphaNumericOrChinese(_ text: String) -> Bool {
+        for scalar in text.unicodeScalars {
+            if CharacterSet.alphanumerics.contains(scalar) {
+                return true
+            }
+            if scalar.value >= 0x4E00 && scalar.value <= 0x9FFF {
+                return true
+            }
+        }
+        return false
+    }
+
+    static func getProcessCommandLine(pid: pid_t) -> String? {
+        var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
+        var size: Int = 0
+        guard sysctl(&mib, 3, nil, &size, nil, 0) == 0, size > 4 else { return nil }
+        var buffer = [CChar](repeating: 0, count: size)
+        guard sysctl(&mib, 3, &buffer, &size, nil, 0) == 0 else { return nil }
+        return buffer.withUnsafeBufferPointer { ptr -> String? in
+            guard let base = ptr.baseAddress else { return nil }
+            let strData = Data(bytes: base + 4, count: size - 4)
+            return String(data: strData, encoding: .utf8)?.replacingOccurrences(of: "\0", with: " ")
+        }
+    }
+
+    static func isAiCliInForeground() -> Bool {
+        let count = proc_listpids(UInt32(PROC_ALL_PIDS), 0, nil, 0)
+        guard count > 0 else { return false }
+        var pids = [pid_t](repeating: 0, count: Int(count))
+        let actualCount = proc_listpids(UInt32(PROC_ALL_PIDS), 0, &pids, count)
+        let aiKeywords = ["agy", "codex", "claude", "chatgpt", "gemini", "copilot"]
+
+        let numPids = Int(actualCount) / MemoryLayout<pid_t>.size
+        var pathBuf = [CChar](repeating: 0, count: 4096)
+
+        for i in 0..<numPids {
+            let p = pids[i]
+            guard p > 0 else { continue }
+
+            // 1. Get process executable path via proc_pidpath (works reliably across all UIDs without privilege issues)
+            let pathLen = proc_pidpath(p, &pathBuf, UInt32(pathBuf.count))
+            guard pathLen > 0 else { continue }
+            let execPath = String(cString: pathBuf).lowercased()
+
+            var matchesAi = false
+            for kw in aiKeywords {
+                if execPath.hasSuffix("/" + kw) || execPath.contains("/" + kw + "/") || execPath.contains("/" + kw + "-") {
+                    matchesAi = true
+                    break
+                }
+            }
+
+            if !matchesAi {
+                if let cmdline = getProcessCommandLine(pid: p)?.lowercased() {
+                    for kw in aiKeywords {
+                        if cmdline.contains("/" + kw + " ") || cmdline.contains(" " + kw + " ") || cmdline.hasPrefix(kw + " ") {
+                            matchesAi = true
+                            break
+                        }
+                    }
+                }
+            }
+
+            guard matchesAi else { continue }
+
+            // 2. Verify if this AI CLI is currently in the foreground of a terminal session
+            // sysctl(KERN_PROC_PID) returns kinfo_proc across users without EPERM
+            var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, p]
+            var proc = kinfo_proc()
+            var size = MemoryLayout<kinfo_proc>.size
+            if sysctl(&mib, 4, &proc, &size, nil, 0) == 0 {
+                let pgid = proc.kp_eproc.e_pgid
+                let tpgid = proc.kp_eproc.e_tpgid
+                let pid = proc.kp_proc.p_pid
+                if tpgid > 0 && (pgid == tpgid || pid == tpgid) {
+                    AFMDevLogger.shared.log("AI CLI DETECTED IN FOREGROUND: pid=\(p), path='\(execPath)', pgid=\(pgid), tpgid=\(tpgid)")
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
     private func scheduleAFMRequest(
         inputting: InputState.Inputting, client: Any?
     ) {
@@ -1284,25 +1434,39 @@ extension McBopomofoInputMethodController {
             let startLoc = (marked.location != NSNotFound) ? marked.location : sel.location
             guard startLoc != NSNotFound && startLoc > 0 else { return nil }
 
-            let checkLen = min(startLoc, 120)
+            let checkLen = min(startLoc, 180)
             let searchRange = NSRange(location: startLoc - checkLen, length: checkLen)
             guard let attr = client.attributedSubstring(from: searchRange) else { return nil }
-            let precedingText = attr.string
-            guard !precedingText.isEmpty else { return nil }
+            let fullPreceding = attr.string
+            guard !fullPreceding.isEmpty else { return nil }
 
-            let triggers = [">>", "》》", "。。"]
+            // Strictly bound preceding context to the current line (never cross \n or \r into scrollback or previous output)
+            let lineStartIndex: String.Index
+            if let lastNewline = fullPreceding.lastIndex(where: { $0 == "\n" || $0 == "\r" }) {
+                lineStartIndex = fullPreceding.index(after: lastNewline)
+            } else {
+                lineStartIndex = fullPreceding.startIndex
+            }
 
-            // Case 1: Preceding document text contains an explicit trigger prefix (e.g. ">> " or "。。")
+            let precedingText = String(fullPreceding[lineStartIndex...])
+            let lineOffsetInPreceding = (fullPreceding[..<lineStartIndex] as NSString).length
+            let lineStartLoc = (startLoc - checkLen) + lineOffsetInPreceding
+            let lineCheckLen = (precedingText as NSString).length
+            guard lineCheckLen > 0 else { return nil }
+
+            let triggers = [">>", "》》", "。。", "..", "$$"]
+
+            // Case 1: Preceding document text on current line contains an explicit trigger prefix (e.g. ">> " or "。。")
             for trigger in triggers {
                 if precedingText.contains(trigger) {
                     let nsPreceding = precedingText as NSString
                     let triggerNSRange = nsPreceding.range(of: trigger, options: .backwards)
                     if triggerNSRange.location != NSNotFound {
-                        let replaceLen = checkLen - triggerNSRange.location
+                        let replaceLen = lineCheckLen - triggerNSRange.location
                         let textSlice = (nsPreceding.substring(from: triggerNSRange.location) as String)
                         return PrecedingPromptContext(
                             prefixText: textSlice,
-                            replaceRange: NSRange(location: startLoc - replaceLen, length: replaceLen)
+                            replaceRange: NSRange(location: lineStartLoc + triggerNSRange.location, length: replaceLen)
                         )
                     }
                 }
@@ -1310,29 +1474,45 @@ extension McBopomofoInputMethodController {
 
             // Case 2: Composing buffer has prompt optimization suffix/prefix (e.g. "。。" or ">>")
             // In this case, capture preceding text up to the start of the current sentence/line
-            let isComposingTriggered = sentence.hasSuffix("。。") || sentence.hasSuffix(">>") || sentence.hasSuffix("》》")
-                || sentence.hasPrefix(">>") || sentence.hasPrefix("》》") || sentence.hasPrefix("。。")
+            let isComposingTriggered = sentence.hasSuffix("。。") || sentence.hasSuffix(">>") || sentence.hasSuffix("》》") || sentence.hasSuffix("..") || sentence.hasSuffix("$$")
+                || sentence.hasPrefix(">>") || sentence.hasPrefix("》》") || sentence.hasPrefix("。。") || sentence.hasPrefix("..") || sentence.hasPrefix("$$")
 
             if isComposingTriggered {
-                // Scan backwards for sentence/paragraph boundaries
+                let delimiters: [Character] = ["\n", "\r", "\t", "。", "！", "？", "!", "?", ";", "；", "$", "%", "#", "›", ">", "》"]
+                var searchSlice = precedingText[...]
+                // Drop trailing punctuation or whitespace from the preceding committed text
+                while let last = searchSlice.last, delimiters.contains(last) || last.isWhitespace {
+                    searchSlice = searchSlice.dropLast()
+                }
+
+                // If nothing remains after dropping delimiters/spaces, preceding text was only prompt/delimiter symbols!
+                guard !searchSlice.isEmpty else { return nil }
+
                 var boundaryIndex = precedingText.startIndex
-                let delimiters: [Character] = ["\n", "\r", "。", "！", "？", "!", "?"]
-                if let lastDelim = precedingText.lastIndex(where: { delimiters.contains($0) }) {
+                if let lastDelim = searchSlice.lastIndex(where: { delimiters.contains($0) }) {
                     boundaryIndex = precedingText.index(after: lastDelim)
                 }
 
                 let textSlice = String(precedingText[boundaryIndex...])
-                if !textSlice.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    let sliceLen = (textSlice as NSString).length
+                let trimmed = textSlice.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty && !trimmed.allSatisfy({ delimiters.contains($0) }) {
+                    let sliceNSRange = (precedingText as NSString).range(of: textSlice, options: .backwards)
+                    let sliceStartLoc = (sliceNSRange.location != NSNotFound) ? (lineStartLoc + sliceNSRange.location) : (startLoc - (textSlice as NSString).length)
                     return PrecedingPromptContext(
                         prefixText: textSlice,
-                        replaceRange: NSRange(location: startLoc - sliceLen, length: sliceLen)
+                        replaceRange: NSRange(location: sliceStartLoc, length: (textSlice as NSString).length)
                     )
                 }
             }
 
             return nil
         }()
+
+        // If sentence contains only punctuation/symbols and has no preceding context,
+        // do not dispatch to phonetic correction (which would eat duplicate punctuation like 。。).
+        if precedingContext == nil && !Self.containsAlphaNumericOrChinese(sentence) {
+            return
+        }
 
         let clientPrecedingRange = precedingContext?.replaceRange
         if let context = precedingContext {
@@ -1371,7 +1551,10 @@ extension McBopomofoInputMethodController {
             )
             AFMDevLogger.shared.log("AFM IN FLIGHT (COLOR CHANGED to INDIGO) sentence='\(sentence)'")
 
-            let correctedSentence = await afmClient.correctSentence(sentence: sentence)
+            let isTerminal = Self.isTerminalApp(capturedClient)
+            let isAiCli = isTerminal ? Self.isAiCliInForeground() : false
+            AFMDevLogger.shared.log("CONTEXT EVAL: isTerminal=\(isTerminal), isAiCli=\(isAiCli)")
+            let correctedSentence = await afmClient.correctSentence(sentence: sentence, isTerminal: isTerminal, isAiCli: isAiCli)
 
             guard !Task.isCancelled,
                   let self = self,
@@ -1414,8 +1597,8 @@ extension McBopomofoInputMethodController {
             let corrNS = correctedSentence as NSString
             let hasCloze = sentence.contains("??") || sentence.contains("？？")
             let isPromptOptimization = (
-                sentence.hasPrefix(">>") || sentence.hasPrefix("》》") || sentence.hasPrefix("。。") ||
-                sentence.hasSuffix(">>") || sentence.hasSuffix("》》") || sentence.hasSuffix("。。")
+                sentence.hasPrefix(">>") || sentence.hasPrefix("》》") || sentence.hasPrefix("。。") || sentence.hasPrefix("..") || sentence.hasPrefix("$$") ||
+                sentence.hasSuffix(">>") || sentence.hasSuffix("》》") || sentence.hasSuffix("。。") || sentence.hasSuffix("..") || sentence.hasSuffix("$$")
             ) && Preferences.afmPromptOptimizerEnabled
             let allowsLengthChange = (hasCloze && Preferences.afmClozeFillingEnabled) || Preferences.afmSemanticFluencyRewriteEnabled || isPromptOptimization
 
@@ -1429,11 +1612,6 @@ extension McBopomofoInputMethodController {
                     AFMDevLogger.shared.log("AFM WHOLE-SENTENCE LENGTH MISMATCH: orig='\(sentence)', corr='\(correctedSentence)'")
                     return
                 }
-            }
-
-            if let precedingRange = clientPrecedingRange {
-                // Erase the preceding >> from the client document
-                capturedClient.insertText("", replacementRange: precedingRange)
             }
 
             // Find all changed ranges
@@ -1489,6 +1667,19 @@ extension McBopomofoInputMethodController {
             newState.afmHighlightedRanges = changedRanges.map { NSValue(range: $0) }
             if let firstRange = changedRanges.first {
                 newState.afmHighlightedRange = firstRange
+            }
+
+            if isPromptOptimization, let preceding = precedingContext {
+                let marked = capturedClient.markedRange()
+                let markedLen = (marked.location != NSNotFound && marked.length != NSNotFound)
+                    ? marked.length
+                    : (capturedInputting.composingBuffer as NSString).length
+                let totalReplaceRange = NSRange(
+                    location: preceding.replaceRange.location,
+                    length: preceding.replaceRange.length + markedLen
+                )
+                newState.afmReplacementRange = totalReplaceRange
+                AFMDevLogger.shared.log("AFM PROMPT-OPT TOTAL REPLACEMENT RANGE set to \(totalReplaceRange) (preceding=\(preceding.replaceRange), markedLen=\(markedLen))")
             }
 
             AFMAssistDiagnostics.shared.record(.applied)
@@ -1609,17 +1800,33 @@ extension McBopomofoInputMethodController {
             return
         }
 
-        // the selection range is where the cursor is, with the length being 0 and replacement range NSNotFound,
-        // i.e. the client app needs to take care of where to put this composing buffer
+        let replacementRange = state.afmReplacementRange
         client.setMarkedText(
             state.attributedString, selectionRange: NSMakeRange(Int(state.cursorIndex), 0),
-            replacementRange: NSMakeRange(NSNotFound, NSNotFound))
+            replacementRange: replacementRange)
+
+        if replacementRange.location != NSNotFound && replacementRange.length > 0 {
+            // Verify if client honored replacementRange
+            let actualMarked = client.markedRange()
+            if actualMarked.location != NSNotFound && actualMarked.location > replacementRange.location {
+                // Client ignored replacementRange outside composition!
+                // Fallback direct insert: replaces the entire range (preceding committed text + composing buffer) directly
+                AFMDevLogger.shared.log("FALLBACK DIRECT INSERT: client ignored replacementRange \(replacementRange), actualMarked=\(actualMarked)")
+                client.insertText(state.composingBuffer, replacementRange: replacementRange)
+                keyHandler.clear()
+                self.state = InputState.Empty()
+                return
+            }
+        }
+
         if !state.tooltip.isEmpty {
             show(
                 tooltip: state.tooltip, composingBuffer: state.composingBuffer,
                 cursorIndex: state.cursorIndex, client: client)
         }
-        scheduleAFMRequest(inputting: state, client: client)
+        if replacementRange.location == NSNotFound {
+            scheduleAFMRequest(inputting: state, client: client)
+        }
     }
 
     private func handle(state: InputState.Marking, previous: InputState, client: Any?) {

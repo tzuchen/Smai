@@ -649,7 +649,7 @@ extension Preferences {
 }
 
 extension Preferences {
-    @UserDefault(key: kAFMAssistEnabledKey, defaultValue: false)
+    @UserDefault(key: kAFMAssistEnabledKey, defaultValue: true)
     @objc static var afmAssistEnabled: Bool
 
     @UserDefault(key: kAFMQwenServerURLKey, defaultValue: "")
@@ -664,7 +664,7 @@ extension Preferences {
     @UserDefault(key: kAFMNearPhoneticFixEnabledKey, defaultValue: true)
     @objc static var afmNearPhoneticFixEnabled: Bool
 
-    @UserDefault(key: kAFMSemanticFluencyRewriteEnabledKey, defaultValue: false)
+    @UserDefault(key: kAFMSemanticFluencyRewriteEnabledKey, defaultValue: true)
     @objc static var afmSemanticFluencyRewriteEnabled: Bool
 
     @UserDefault(key: kAFMClozeFillingEnabledKey, defaultValue: true)
