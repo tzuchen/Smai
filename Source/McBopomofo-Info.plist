@@ -17,7 +17,7 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.2.0</string>
+	<string>1.3.0</string>
 	<key>CFBundleSignature</key>
 	<string>BPMF</string>
 	<key>CFBundleVersion</key>
@@ -334,6 +334,8 @@
 	</array>
 	<key>tsInputMethodIconFileKey</key>
 	<string>Bopomofo.tiff</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>思脈注音需要使用麥克風以提供 Typeless 智慧語音輸入功能。</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>

@@ -44,7 +44,7 @@ deploy() {
 
     END_TIME=$(python3 -c 'import time; print(time.time())')
     ELAPSED=$(python3 -c "print(f'{$END_TIME - $START_TIME:.2f}')")
-    echo "✅ [4/4] 思脈注音 v1.2.0 (Build 20261024) 熱部屬完成！耗時: ${ELAPSED}s"
+    echo "✅ [4/4] 思脈注音 v1.3.0 (Build 20261024) 熱部屬完成！耗時: ${ELAPSED}s"
 }
 
 if [ "$1" == "--watch" ]; then

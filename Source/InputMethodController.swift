@@ -293,7 +293,7 @@ extension CandidateController {
 }
 
 struct SmaiVersion {
-    static let current = "1.2.0"
+    static let current = "1.3.0"
     static let build = "20261024"
     static var displayString: String {
         return "v\(current) (Build \(build))"
@@ -428,8 +428,25 @@ class McBopomofoInputMethodController: IMKInputController {
             promptOptItem.target = self
             promptOptItem.state = Preferences.afmPromptOptimizerEnabled.state
 
+            let voiceItem = afmSubmenu.addItem(
+                withTitle: "Typeless 語音輸入模式 (⌥V)",
+                action: #selector(toggleVoiceInput(_:)), keyEquivalent: "")
+            voiceItem.target = self
+
             afmAssistItem.submenu = afmSubmenu
             menu.addItem(afmAssistItem)
+        }
+
+        menu.addItem(NSMenuItem.separator())
+
+        if VoiceInputManager.shared.isRecordingOrProcessing {
+            menu.addItem(
+                withTitle: "⏹️ 停止語音輸入並潤飾 (Enter)",
+                action: #selector(toggleVoiceInput(_:)), keyEquivalent: "")
+        } else {
+            menu.addItem(
+                withTitle: "🎙️ 啟動 Typeless 語音輸入 (⌥V 或 /v)",
+                action: #selector(toggleVoiceInput(_:)), keyEquivalent: "")
         }
 
         menu.addItem(NSMenuItem.separator())
@@ -778,6 +795,34 @@ class McBopomofoInputMethodController: IMKInputController {
             let hasOpt = event.modifierFlags.contains(.option)
             let hasShift = event.modifierFlags.contains(.shift)
 
+            // 0. If Typeless Voice Input is active, intercept keystrokes
+            if VoiceInputManager.shared.isRecordingOrProcessing {
+                let isReturn = (event.keyCode == UInt16(kVK_Return))
+                let isEscape = (event.keyCode == UInt16(kVK_Escape))
+                let isOptV = (event.keyCode == UInt16(kVK_ANSI_V)) && hasOpt && !hasCmd && !hasCtrl
+
+                if isReturn || isOptV {
+                    VoiceInputManager.shared.stopAndPolish()
+                    return true
+                } else if isEscape {
+                    VoiceInputManager.shared.cancel()
+                    (client as? IMKTextInput)?.setMarkedText(
+                        "",
+                        selectionRange: NSRange(location: 0, length: 0),
+                        replacementRange: NSRange(location: NSNotFound, length: NSNotFound)
+                    )
+                    return true
+                }
+                return true
+            }
+
+            // Voice Shortcut: Option + V toggles voice input when in Bopomofo mode
+            let isVKey = (event.keyCode == UInt16(kVK_ANSI_V))
+            if isVKey && hasOpt && !hasCmd && !hasCtrl {
+                toggleVoiceInput(client)
+                return true
+            }
+
             // 1. If Smart Slash Command mode is active, intercept all keystrokes
             if slashTracker.isActive {
                 let action = slashTracker.handleKey(keyCode: event.keyCode, chars: chars, flags: event.modifierFlags)
@@ -791,6 +836,11 @@ class McBopomofoInputMethodController: IMKInputController {
                     return true
                 case .commit(let text):
                     self.resetSlashMarkedText(client: client)
+                    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                    if trimmed == "/v" || trimmed == "/voice" || trimmed == "/typeless" {
+                        self.startVoiceInput(client: client)
+                        return true
+                    }
                     if let client = client as? IMKTextInput {
                         self.commit(text: text, client: client)
                     }
@@ -1207,6 +1257,96 @@ class McBopomofoInputMethodController: IMKInputController {
         ]
         try? task.run()
         NSApp.terminate(nil)
+    }
+
+    @objc func toggleVoiceInput(_ sender: Any?) {
+        let textClient = (currentClient as? IMKTextInput) ?? (self.client() as? IMKTextInput)
+        if VoiceInputManager.shared.isRecordingOrProcessing {
+            VoiceInputManager.shared.stopAndPolish()
+        } else {
+            startVoiceInput(client: textClient)
+        }
+    }
+
+    func startVoiceInput(client: Any?) {
+        guard let textClient = client as? IMKTextInput else { return }
+
+        // If composing, commit current composition first
+        if state is InputState.NotEmpty {
+            self.commitComposition(textClient)
+        }
+        slashTracker.reset()
+
+        let context = RecentCommitHistoryTracker.shared.recentContext(maxLimit: 120)
+
+        VoiceInputManager.shared.start(
+            precedingContext: context,
+            onStateChange: { state in
+                switch state {
+                case .requestingPermission:
+                    textClient.setMarkedText(
+                        "🎙️ [Typeless 請求麥克風權限中...]",
+                        selectionRange: NSRange(location: 0, length: 0),
+                        replacementRange: NSRange(location: NSNotFound, length: NSNotFound)
+                    )
+                case .connecting:
+                    textClient.setMarkedText(
+                        "🎙️ [Typeless 連線語音辨識中...]",
+                        selectionRange: NSRange(location: 0, length: 0),
+                        replacementRange: NSRange(location: NSNotFound, length: NSNotFound)
+                    )
+                case .listening(let partial):
+                    let display = partial.isEmpty ? "🎙️ [Typeless 聆聽中...] (說完按 Enter 送出，按 Esc 取消)" : "🎙️ 正在聆聽：\(partial)"
+                    textClient.setMarkedText(
+                        display,
+                        selectionRange: NSRange(location: display.utf16.count, length: 0),
+                        replacementRange: NSRange(location: NSNotFound, length: NSNotFound)
+                    )
+                case .polishing:
+                    textClient.setMarkedText(
+                        "✨ [Typeless AI 思考潤飾中...]",
+                        selectionRange: NSRange(location: 0, length: 0),
+                        replacementRange: NSRange(location: NSNotFound, length: NSNotFound)
+                    )
+                case .finished:
+                    break
+                case .error(let msg):
+                    textClient.setMarkedText(
+                        "⚠️ \(msg)",
+                        selectionRange: NSRange(location: 0, length: 0),
+                        replacementRange: NSRange(location: NSNotFound, length: NSNotFound)
+                    )
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                        textClient.setMarkedText(
+                            "",
+                            selectionRange: NSRange(location: 0, length: 0),
+                            replacementRange: NSRange(location: NSNotFound, length: NSNotFound)
+                        )
+                    }
+                case .idle:
+                    break
+                }
+            },
+            completion: { [weak self] result in
+                guard let self = self else { return }
+                if let text = result, !text.isEmpty {
+                    textClient.setMarkedText(
+                        "",
+                        selectionRange: NSRange(location: 0, length: 0),
+                        replacementRange: NSRange(location: NSNotFound, length: NSNotFound)
+                    )
+                    self.commit(text: text, client: textClient)
+                    AFMDevLogger.shared.log("VOICE-INPUT: Committed polished text: '\(text)'")
+                } else {
+                    textClient.setMarkedText(
+                        "",
+                        selectionRange: NSRange(location: 0, length: 0),
+                        replacementRange: NSRange(location: NSNotFound, length: NSNotFound)
+                    )
+                }
+                self.handle(state: InputState.EmptyIgnoringPreviousState(), client: textClient)
+            }
+        )
     }
 
     @objc func checkForUpdate(_ sender: Any?) {

@@ -306,6 +306,20 @@ internal struct AFMAssistClient: Sendable {
         }
     }
 
+    func typelessPolish(
+        rawTranscript: String,
+        precedingContext: String = ""
+    ) async -> String? {
+        let trimmed = rawTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return await AFMRequestCoordinator.shared.run {
+            await self.performTypelessPolish(
+                rawTranscript: trimmed,
+                precedingContext: precedingContext
+            )
+        }
+    }
+
     private static func cleanCorrectedSentence(_ raw: String, original: String) -> String {
         var t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if t.hasPrefix("```") && t.hasSuffix("```") {
@@ -562,6 +576,142 @@ internal struct AFMAssistClient: Sendable {
             AFMDevLogger.shared.log("DEEP-CONTEXT REQUEST FAILED in \(elapsed)ms [\(endpoint)]: \(error.localizedDescription)")
             return nil
         }
+    }
+
+    private func performTypelessPolish(
+        rawTranscript: String,
+        precedingContext: String
+    ) async -> String? {
+        let qwenCandidates = AFMEndpointResolver.shared.qwenEndpoints()
+        for endpoint in qwenCandidates {
+            try? Task.checkCancellation()
+            if Task.isCancelled { return nil }
+            if let result = await performTypelessPolishWithEndpoint(
+                rawTranscript: rawTranscript,
+                precedingContext: precedingContext,
+                endpoint: endpoint,
+                isQwen: true
+            ) {
+                AFMEndpointResolver.shared.markQwenSuccess(url: endpoint)
+                return result
+            } else {
+                AFMEndpointResolver.shared.markQwenFailure(url: endpoint)
+            }
+        }
+
+        let afmCandidates = AFMEndpointResolver.shared.afmEndpoints()
+        for endpoint in afmCandidates {
+            try? Task.checkCancellation()
+            if Task.isCancelled { return nil }
+            if let result = await performTypelessPolishWithEndpoint(
+                rawTranscript: rawTranscript,
+                precedingContext: precedingContext,
+                endpoint: endpoint,
+                isQwen: false
+            ) {
+                return result
+            }
+        }
+        return rawTranscript
+    }
+
+    private func performTypelessPolishWithEndpoint(
+        rawTranscript: String,
+        precedingContext: String,
+        endpoint: String,
+        isQwen: Bool
+    ) async -> String? {
+        let startTime = Date()
+        do {
+            try Task.checkCancellation()
+            guard let url = URL(string: endpoint) else { return nil }
+
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            let isCachedWorking = (endpoint == AFMEndpointResolver.shared.cachedWorkingURL)
+            request.timeoutInterval = isCachedWorking ? 6.0 : 3.5
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+            let sysPrompt = """
+            你是繁體中文「Typeless 智慧語音輸入後製專家」。你的任務是將使用者用語音口述辨識出來的原始字串，重構成通順、精準、專業的繁體中文書面文字。
+
+            重構規則：
+            1. 【去除冗言贅字】：徹底過濾口語中的「呃」、「那個」、「然後」、「就是說」、「嗯」等無意義填補詞。
+            2. 【理解改口修正】：使用者說話時若有臨時修正、改口（例如「不對」、「改為」、「我是說」、「等等」），務必理解其最終意圖，捨棄被推翻的舊內容，只保留並整合最終定案的語意。
+            3. 【專業格式與標點】：自動補齊正確標點符號；英文專有名詞、數字、時間格式自然規範化（例如 PR、API、10:00）；若為口述步驟或列點，請整理為乾淨條列式。
+            4. 【參考前文脈絡】：若有提供前文脈絡，請保持主題與專有名詞一致性。
+            5. 【嚴格直接輸出】：只輸出潤飾重構後的最終文字，嚴禁添加任何前綴、引號、說明、問候或客套話。
+            """
+
+            let userPrompt: String
+            if !precedingContext.isEmpty {
+                userPrompt = "【前文脈絡】：\(precedingContext)\n【語音輸入】：\(rawTranscript)\n輸出："
+            } else {
+                userPrompt = "【語音輸入】：\(rawTranscript)\n輸出："
+            }
+
+            var body: [String: Any] = [
+                "model": isQwen ? "spark-vllm-docker" : "system",
+                "temperature": 0.1,
+                "max_tokens": 512,
+                "stream": false,
+                "messages": [
+                    ["role": "system", "content": sysPrompt],
+                    ["role": "user", "content": userPrompt]
+                ]
+            ]
+            if isQwen {
+                body["chat_template_kwargs"] = [
+                    "enable_thinking": false
+                ]
+            }
+
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let tag = isQwen ? "TYPELESS-QWEN" : "TYPELESS-AFM"
+            AFMDevLogger.shared.log("TYPELESS REQUEST (\(tag)) [\(endpoint)]: '\(rawTranscript)'")
+
+            let (data, response) = try await session.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200...299).contains(httpResponse.statusCode) else {
+                return nil
+            }
+
+            guard let rawReply = Self.extractContent(from: data),
+                  !rawReply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return nil
+            }
+
+            let elapsed = Int(Date().timeIntervalSince(startTime) * 1000)
+            let cleaned = Self.cleanTypelessOutput(rawReply)
+            AFMDevLogger.shared.log("TYPELESS REPLY (\(tag)) in \(elapsed)ms: '\(cleaned)'")
+            return cleaned
+        } catch {
+            if Task.isCancelled { return nil }
+            let elapsed = Int(Date().timeIntervalSince(startTime) * 1000)
+            AFMDevLogger.shared.log("TYPELESS FAILED in \(elapsed)ms [\(endpoint)]: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    private static func cleanTypelessOutput(_ raw: String) -> String {
+        var t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if t.hasPrefix("```") && t.hasSuffix("```") {
+            t = t.trimmingCharacters(in: CharacterSet(charactersIn: "`")).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        for prefix in [
+            "【輸出】：", "【輸出】:", "輸出：", "輸出:",
+            "【結果】：", "【結果】:", "結果：", "結果:",
+            "【潤飾】：", "【潤飾】:", "潤飾：", "潤飾:",
+            "【重構】：", "【重構】:", "重構：", "重構:"
+        ] {
+            if t.hasPrefix(prefix) {
+                t = String(t.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
+        if (t.hasPrefix("「") && t.hasSuffix("」")) || (t.hasPrefix("\"") && t.hasSuffix("\"")) || (t.hasPrefix("“") && t.hasSuffix("”")) {
+            t = String(t.dropFirst().dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return t
     }
 
     private static func parseAndProtectShellCommand(rawReply: String) -> String? {
