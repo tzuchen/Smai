@@ -228,6 +228,37 @@ internal final class AFMEndpointResolver: @unchecked Sendable {
     }
 }
 
+public final class RecentCommitHistoryTracker: @unchecked Sendable {
+    public static let shared = RecentCommitHistoryTracker()
+    private var history: [String] = []
+    private let maxChars = 500
+    private let lock = NSLock()
+
+    public func append(_ text: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        if history.last == trimmed {
+            return
+        }
+        history.append(trimmed)
+        while history.joined().count > maxChars {
+            history.removeFirst()
+        }
+    }
+
+    public func recentContext(maxLimit: Int = 120) -> String {
+        lock.lock()
+        defer { lock.unlock() }
+        let joined = history.joined(separator: " ")
+        if joined.count <= maxLimit {
+            return joined
+        }
+        return String(joined.suffix(maxLimit))
+    }
+}
+
 internal struct AFMAssistClient: Sendable {
     private let session: URLSession
     private let timeout: TimeInterval
@@ -258,15 +289,44 @@ internal struct AFMAssistClient: Sendable {
         }
     }
 
+    func deepContextCorrectSentence(
+        sentence: String,
+        precedingContext: String,
+        isTerminal: Bool = false,
+        isAiCli: Bool = false
+    ) async -> String? {
+        guard sentence.count >= 2 else { return nil }
+        return await AFMRequestCoordinator.shared.run {
+            await self.performDeepContextCorrectSentence(
+                sentence: sentence,
+                precedingContext: precedingContext,
+                isTerminal: isTerminal,
+                isAiCli: isAiCli
+            )
+        }
+    }
+
     private static func cleanCorrectedSentence(_ raw: String, original: String) -> String {
         var t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if t.hasPrefix("```") && t.hasSuffix("```") {
             t = t.trimmingCharacters(in: CharacterSet(charactersIn: "`")).trimmingCharacters(in: .whitespacesAndNewlines)
         }
-        for prefix in ["校正：", "修正：", "結果：", "原句：", "Prompt：", "Prompt:", "最佳化 Prompt：", "最佳化Prompt：", "優化 Prompt：", "優化Prompt："] {
+        for prefix in [
+            "【當前句】：", "【當前句】:", "當前句：", "當前句:",
+            "【校正】：", "【校正】:", "校正：", "校正:",
+            "【修正】：", "【修正】:", "修正：", "修正:",
+            "結果：", "原句：",
+            "Prompt：", "Prompt:", "最佳化 Prompt：", "最佳化Prompt：", "優化 Prompt：", "優化Prompt："
+        ] {
             if t.hasPrefix(prefix) {
                 t = String(t.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
             }
+        }
+        if let lastMarker = t.range(of: "【當前句】：", options: .backwards) {
+            t = String(t[lastMarker.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if let lastMarker = t.range(of: "校正：", options: .backwards) {
+            t = String(t[lastMarker.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
         }
         if (t.hasPrefix("「") && t.hasSuffix("」")) || (t.hasPrefix("\"") && t.hasSuffix("\"")) || (t.hasPrefix("“") && t.hasSuffix("”")) {
             t = String(t.dropFirst().dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -370,6 +430,138 @@ internal struct AFMAssistClient: Sendable {
             }
         }
         return nil
+    }
+
+    private func performDeepContextCorrectSentence(
+        sentence: String,
+        precedingContext: String,
+        isTerminal: Bool = false,
+        isAiCli: Bool = false
+    ) async -> String? {
+        let qwenCandidates = AFMEndpointResolver.shared.qwenEndpoints()
+        for endpoint in qwenCandidates {
+            try? Task.checkCancellation()
+            if Task.isCancelled { return nil }
+            if let result = await performDeepContextCorrectSentenceWithEndpoint(
+                sentence: sentence,
+                precedingContext: precedingContext,
+                endpoint: endpoint,
+                isQwen: true,
+                isTerminal: isTerminal,
+                isAiCli: isAiCli
+            ) {
+                AFMEndpointResolver.shared.markQwenSuccess(url: endpoint)
+                return result
+            } else {
+                AFMEndpointResolver.shared.markQwenFailure(url: endpoint)
+            }
+        }
+
+        AFMDevLogger.shared.log("DEEP-CONTEXT FALLING BACK TO ON-DEVICE AFM")
+        let afmCandidates = AFMEndpointResolver.shared.afmEndpoints()
+        for endpoint in afmCandidates {
+            try? Task.checkCancellation()
+            if Task.isCancelled { return nil }
+            if let result = await performDeepContextCorrectSentenceWithEndpoint(
+                sentence: sentence,
+                precedingContext: precedingContext,
+                endpoint: endpoint,
+                isQwen: false,
+                isTerminal: isTerminal,
+                isAiCli: isAiCli
+            ) {
+                return result
+            }
+        }
+        return nil
+    }
+
+    private func performDeepContextCorrectSentenceWithEndpoint(
+        sentence: String,
+        precedingContext: String,
+        endpoint: String,
+        isQwen: Bool,
+        isTerminal: Bool = false,
+        isAiCli: Bool = false
+    ) async -> String? {
+        let startTime = Date()
+        do {
+            try Task.checkCancellation()
+
+            guard let url = URL(string: endpoint) else {
+                AFMDevLogger.shared.log("INVALID ENDPOINT URL: \(endpoint)")
+                return nil
+            }
+
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            let isCachedWorking = (endpoint == AFMEndpointResolver.shared.cachedWorkingURL)
+            request.timeoutInterval = isCachedWorking ? 3.0 : 2.0
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+            let sysPrompt = """
+            你是繁體中文注音輸入法「深度語境與同音詞校正專家」。
+            使用者的輸入可能存在注音同音、近音選字錯誤，或者因單句缺少上下文而導致的誤判。
+            請仔細參考【前文脈絡】，理解整體對話或寫作主題（例如交通道路、軟體工程、生活日常、學術科技等），重新校正【當前句】。
+
+            校正規則：
+            1. 【結合前文主題】：根據前文脈絡辨識專門術語與常見詞（例如前文提到交通、塞車、道路時，「紮到/扎到/砸到」應校正為「匝道」）。
+            2. 【嚴格同音/近音替換】：使用者錯字皆來自注音輸入法選字偏差，替換字必須為同音字（同聲母韻母聲調）或近音字。嚴禁任意改換讀音無關的字詞。
+            3. 【只輸出當前句】：絕對不可輸出【前文脈絡】中的內容，僅輸出校正後的【當前句】。
+            4. 【格式規範】：直接輸出校正後的語句，嚴禁添加任何引號、前綴、說明或客套話。
+            """
+
+            let userPrompt: String
+            if !precedingContext.isEmpty {
+                userPrompt = "【前文脈絡】：\(precedingContext)\n【當前句】：\(sentence)\n校正："
+            } else {
+                userPrompt = "【當前句】：\(sentence)\n校正："
+            }
+
+            var body: [String: Any] = [
+                "model": isQwen ? "spark-vllm-docker" : "system",
+                "temperature": 0.0,
+                "max_tokens": 128,
+                "stream": false,
+                "messages": [
+                    ["role": "system", "content": sysPrompt],
+                    ["role": "user", "content": userPrompt]
+                ]
+            ]
+            if isQwen {
+                body["chat_template_kwargs"] = [
+                    "enable_thinking": false
+                ]
+            }
+
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let tag = isQwen ? "DEEP-QWEN" : "DEEP-AFM"
+            AFMDevLogger.shared.log("DEEP-CONTEXT (\(tag)) REQUEST [\(endpoint)]: sentence='\(sentence)', context='\(precedingContext)'")
+
+            let (data, response) = try await session.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200...299).contains(httpResponse.statusCode)
+            else {
+                AFMDevLogger.shared.log("DEEP-CONTEXT HTTP ERROR: status=\((response as? HTTPURLResponse)?.statusCode ?? -1)")
+                return nil
+            }
+
+            guard let rawReply = Self.extractContent(from: data),
+                  !rawReply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            else {
+                return nil
+            }
+
+            let elapsed = Int(Date().timeIntervalSince(startTime) * 1000)
+            let cleaned = Self.cleanCorrectedSentence(rawReply, original: sentence)
+            AFMDevLogger.shared.log("DEEP-CONTEXT (\(tag)) REPLY in \(elapsed)ms: '\(cleaned)'")
+            return cleaned
+        } catch {
+            if Task.isCancelled { return nil }
+            let elapsed = Int(Date().timeIntervalSince(startTime) * 1000)
+            AFMDevLogger.shared.log("DEEP-CONTEXT REQUEST FAILED in \(elapsed)ms [\(endpoint)]: \(error.localizedDescription)")
+            return nil
+        }
     }
 
     private static func parseAndProtectShellCommand(rawReply: String) -> String? {

@@ -62,19 +62,36 @@ enum VersionUpdateApiError: Error, LocalizedError {
 }
 
 struct VersionUpdateApi {
+    private static let githubApiEndpoint = "https://api.github.com/repos/tzuchen/Smai/releases/latest"
+
+    static func isRemoteVersionNewer(current: String, remote: String) -> Bool {
+        let curParts = current.trimmingCharacters(in: CharacterSet(charactersIn: "vV "))
+            .split(separator: ".").compactMap { Int($0) }
+        let remParts = remote.trimmingCharacters(in: CharacterSet(charactersIn: "vV "))
+            .split(separator: ".").compactMap { Int($0) }
+        let maxLen = max(curParts.count, remParts.count)
+        for i in 0..<maxLen {
+            let c = i < curParts.count ? curParts[i] : 0
+            let r = i < remParts.count ? remParts[i] : 0
+            if r > c { return true }
+            if r < c { return false }
+        }
+        return false
+    }
+
     static func check(
         forced: Bool, callback: @escaping (Result<VersionUpdateApiResult, Error>) -> Void
     ) -> URLSessionTask? {
-        guard let infoDict = Bundle.main.infoDictionary,
-            let updateInfoURLString = infoDict[kUpdateInfoEndpointKey] as? String,
-            let updateInfoURL = URL(string: (updateInfoURLString + (forced ? "?manual=yes" : "")))
-        else {
+        guard let url = URL(string: githubApiEndpoint) else {
             return nil
         }
 
-        let request = URLRequest(
-            url: updateInfoURL, cachePolicy: .reloadIgnoringLocalCacheData,
+        var request = URLRequest(
+            url: url, cachePolicy: .reloadIgnoringLocalCacheData,
             timeoutInterval: kTimeoutInterval)
+        request.setValue("application/vnd.github.v3+json", forHTTPHeaderField: "Accept")
+        request.setValue("Smai-Input-Method/\(SmaiVersion.current)", forHTTPHeaderField: "User-Agent")
+
         let task = URLSession.shared.dataTask(with: request) { data, response, error in
             if let error = error {
                 DispatchQueue.main.async {
@@ -88,71 +105,56 @@ struct VersionUpdateApi {
                 return
             }
 
-            do {
-                guard
-                    let plist = try PropertyListSerialization.propertyList(
-                        from: data ?? Data(), options: [], format: nil) as? [AnyHashable: Any],
-                    let remoteVersion = plist[kCFBundleVersionKey] as? String,
-                    let infoDict = Bundle.main.infoDictionary
-                else {
-                    DispatchQueue.main.async {
-                        forced ? callback(.success(.noNeedToUpdate)) : callback(.success(.ignored))
-                    }
-                    return
-                }
-
-                // TODO: Validate info (e.g. bundle identifier)
-                // TODO: Use HTML to display change log, need a new key like UpdateInfoChangeLogURL for this
-
-                let currentVersion = infoDict[kCFBundleVersionKey as String] as? String ?? ""
-                let result = currentVersion.compare(
-                    remoteVersion, options: .numeric, range: nil, locale: nil)
-
-                if result != .orderedAscending {
-                    DispatchQueue.main.async {
-                        forced ? callback(.success(.noNeedToUpdate)) : callback(.success(.ignored))
-                    }
-                    return
-                }
-
-                guard let siteInfoURLString = plist[kUpdateInfoSiteKey] as? String,
-                    let siteInfoURL = URL(string: siteInfoURLString)
-                else {
-                    DispatchQueue.main.async {
-                        forced ? callback(.success(.noNeedToUpdate)) : callback(.success(.ignored))
-                    }
-                    return
-                }
-
-                var report = VersionUpdateReport(siteUrl: siteInfoURL)
-                var versionDescription = ""
-                let versionDescriptions = plist["Description"] as? [AnyHashable: Any]
-                if let versionDescriptions = versionDescriptions {
-                    var locale = "en"
-                    let supportedLocales = ["en", "zh-Hant", "zh-Hans"]
-                    let preferredTags = Bundle.preferredLocalizations(from: supportedLocales)
-                    if let first = preferredTags.first {
-                        locale = first
-                    }
-                    versionDescription =
-                        versionDescriptions[locale] as? String ?? versionDescriptions["en"]
-                        as? String ?? ""
-                    if !versionDescription.isEmpty {
-                        versionDescription = "\n\n" + versionDescription
-                    }
-                }
-                report.currentShortVersion = infoDict["CFBundleShortVersionString"] as? String ?? ""
-                report.currentVersion = currentVersion
-                report.remoteShortVersion = plist["CFBundleShortVersionString"] as? String ?? ""
-                report.remoteVersion = remoteVersion
-                report.versionDescription = versionDescription
-                DispatchQueue.main.async {
-                    callback(.success(.shouldUpdate(report: report)))
-                }
-            } catch {
+            guard let httpResponse = response as? HTTPURLResponse else {
                 DispatchQueue.main.async {
                     forced ? callback(.success(.noNeedToUpdate)) : callback(.success(.ignored))
                 }
+                return
+            }
+
+            // 404 means no releases published yet on repository -> up to date
+            if httpResponse.statusCode == 404 {
+                DispatchQueue.main.async {
+                    forced ? callback(.success(.noNeedToUpdate)) : callback(.success(.ignored))
+                }
+                return
+            }
+
+            guard (200..<300).contains(httpResponse.statusCode),
+                  let data = data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else {
+                DispatchQueue.main.async {
+                    forced ? callback(.success(.noNeedToUpdate)) : callback(.success(.ignored))
+                }
+                return
+            }
+
+            let rawTagName = json["tag_name"] as? String ?? ""
+            let remoteShortVersion = rawTagName.trimmingCharacters(in: CharacterSet(charactersIn: "vV "))
+            let releaseUrlString = json["html_url"] as? String ?? "https://github.com/tzuchen/Smai/releases"
+            let siteUrl = URL(string: releaseUrlString)
+            let body = (json["body"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+
+            let currentShortVersion = SmaiVersion.current
+            let isNewer = isRemoteVersionNewer(current: currentShortVersion, remote: remoteShortVersion)
+
+            if !isNewer {
+                DispatchQueue.main.async {
+                    forced ? callback(.success(.noNeedToUpdate)) : callback(.success(.ignored))
+                }
+                return
+            }
+
+            var report = VersionUpdateReport(siteUrl: siteUrl)
+            report.currentShortVersion = currentShortVersion
+            report.currentVersion = SmaiVersion.build
+            report.remoteShortVersion = remoteShortVersion
+            report.remoteVersion = rawTagName
+            report.versionDescription = body.isEmpty ? "" : "\n\n更新說明：\n" + body
+
+            DispatchQueue.main.async {
+                callback(.success(.shouldUpdate(report: report)))
             }
         }
         task.resume()
@@ -256,26 +258,23 @@ class AppDelegate: NSObject, NSApplicationDelegate, NonModalAlertWindowControlle
                 switch apiResult {
                 case .shouldUpdate(let report):
                     self.updateNextStepURL = report.siteUrl
-                    let content = String(
-                        format: NSLocalizedString(
-                            "You're currently using McBopomofo %@ (%@), a new version %@ (%@) is now available. Do you want to visit McBopomofo's website to download the version?%@",
-                            comment: ""),
-                        report.currentShortVersion,
-                        report.currentVersion,
-                        report.remoteShortVersion,
-                        report.remoteVersion,
-                        report.versionDescription)
+                    let content = """
+                    發現思脈注音新版本 \(report.remoteShortVersion)！
+                    您目前使用的是 \(report.currentShortVersion) (Build \(report.currentVersion))。\(report.versionDescription)
+
+                    是否前往 GitHub 下載最新版本安裝包？
+                    """
                     NonModalAlertWindowController.shared.show(
-                        title: NSLocalizedString("New Version Available", comment: ""),
+                        title: "發現思脈注音新版本",
                         content: content,
-                        confirmButtonTitle: NSLocalizedString("Visit Website", comment: ""),
-                        cancelButtonTitle: NSLocalizedString("Not Now", comment: ""),
+                        confirmButtonTitle: "前往下載",
+                        cancelButtonTitle: "稍後再說",
                         cancelAsDefault: false, delegate: self)
                 case .noNeedToUpdate:
                     NonModalAlertWindowController.shared.show(
-                        title: NSLocalizedString("Check for Update Completed", comment: ""),
-                        content: NSLocalizedString("McBopomofo is up to date.", comment: ""),
-                        confirmButtonTitle: NSLocalizedString("OK", comment: ""),
+                        title: "版本檢查完成",
+                        content: "思脈注音已是最新版本 (\(SmaiVersion.displayString))。",
+                        confirmButtonTitle: "好",
                         cancelButtonTitle: nil, cancelAsDefault: false, delegate: self)
                 case .ignored:
                     break
@@ -283,12 +282,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NonModalAlertWindowControlle
             case .failure(let error):
                 switch error {
                 case VersionUpdateApiError.connectionError(let message):
-                    let title = NSLocalizedString("Update Check Failed", comment: "")
-                    let content = String(
-                        format: NSLocalizedString(
-                            "There may be no internet connection or the server failed to respond.\n\nError message: %@",
-                            comment: ""), message)
-                    let buttonTitle = NSLocalizedString("Dismiss", comment: "")
+                    let title = "檢查新版失敗"
+                    let content = "無法連接至伺服器或網路連線中斷。\n\n錯誤訊息：\(message)"
+                    let buttonTitle = "關閉"
                     NonModalAlertWindowController.shared.show(
                         title: title, content: content, confirmButtonTitle: buttonTitle,
                         cancelButtonTitle: nil, cancelAsDefault: false, delegate: nil)

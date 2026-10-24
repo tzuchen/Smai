@@ -690,10 +690,12 @@ InputMode InputModePlainBopomofo = @"org.orin.inputmethod.Smai.PlainBopomofo";
     if (_bpmfReadingBuffer->isEmpty() &&
         [state isKindOfClass:[InputStateNotEmpty class]] && (input.isExtraChooseCandidateKey || charCode == 32 || (input.useVerticalMode && (input.isVerticalModeOnlyChooseCandidateKey)))) {
         if (charCode == 32) {
-            // AFM: when enabled, in Bopomofo mode, with cursor at end, no partial
-            // reading, and plain space (no modifiers), insert space reading into
-            // grid instead of committing, so AFM can update the pending sentence.
-            if (Preferences.afmAssistEnabled &&
+            // AFM: when space is NOT set to choose candidate, in Bopomofo mode,
+            // with cursor at end, no partial reading, and plain space (no modifiers),
+            // insert space reading into grid instead of committing, so AFM can update
+            // the pending sentence.
+            if (!Preferences.chooseCandidateUsingSpace &&
+                Preferences.afmAssistEnabled &&
                 [_inputMode isEqualToString:InputModeBopomofo] &&
                 _grid->cursor() >= _grid->length() &&
                 _bpmfReadingBuffer->isEmpty() &&

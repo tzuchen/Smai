@@ -561,7 +561,7 @@ if CommandLine.arguments.count > 1 {
         // Repeat the same punctuation lifecycle at least twice using the same
         // handler to catch override leakage across sentences.
         for iteration in 0..<8 {
-            Preferences.chooseCandidateUsingSpace = iteration < 4
+            Preferences.chooseCandidateUsingSpace = false
             Preferences.selectPhraseAfterCursorAsCandidate = iteration % 4 >= 2
             // Fixed keyboard input for the sentence (ends with a trailing space).
             feed(text: "ji3vu;35 2l4c93u.32ji gp ")
@@ -688,6 +688,40 @@ if CommandLine.arguments.count > 1 {
         let firstToneCorrect = (firstToneBuffer == "他的")
         let firstToneNoSpace = !firstToneBuffer.contains(" ")
         allPass = allPass && firstToneCorrect && firstToneNoSpace
+
+        // Spacebar choosing candidate test: when chooseCandidateUsingSpace is true,
+        // typing space on an existing composing buffer MUST open candidate selection.
+        Preferences.chooseCandidateUsingSpace = true
+        var spaceCandState: InputState = InputState.Empty()
+        for char in "su3" {
+            let input = KeyHandlerInput(
+                inputText: String(char),
+                keyCode: 0,
+                charCode: char.utf16.first!,
+                flags: [],
+                isVerticalMode: false
+            )
+            _ = handler.handle(input: input, state: spaceCandState) { newState in
+                spaceCandState = newState
+            } errorCallback: {
+                errorCount += 1
+            }
+        }
+        let spaceInput = KeyHandlerInput(
+            inputText: " ",
+            keyCode: 49,
+            charCode: 32,
+            flags: [],
+            isVerticalMode: false
+        )
+        _ = handler.handle(input: spaceInput, state: spaceCandState) { newState in
+            spaceCandState = newState
+        } errorCallback: {
+            errorCount += 1
+        }
+        let spaceOpensCandidates = spaceCandState is InputState.ChoosingCandidate
+        allPass = allPass && spaceOpensCandidates
+        handler.clear()
 
         let diagnosticsPassed = allPass
         let resultDict: [String: Any] = [

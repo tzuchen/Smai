@@ -292,6 +292,14 @@ extension CandidateController {
     static let vertical = VerticalCandidateController()
 }
 
+struct SmaiVersion {
+    static let current = "1.2.0"
+    static let build = "20261024"
+    static var displayString: String {
+        return "v\(current) (Build \(build))"
+    }
+}
+
 @objc(McBopomofoInputMethodController)
 class McBopomofoInputMethodController: IMKInputController {
 
@@ -306,6 +314,9 @@ class McBopomofoInputMethodController: IMKInputController {
     private let afmClient = AFMAssistClient()
     private let afmRequestGate = AFMRequestGate()
     private var afmTask: Task<Void, Never>?
+    private var isEnterCommitPending: Bool = false
+    private var lastSentenceEndDownTimestamp: TimeInterval = 0
+    private var lastSentenceEndDownBuffer: String = ""
 
 
     private let afmDiagnosticsMarkerPath = "/Users/Shared/Smai-diagnostics.enabled"
@@ -464,6 +475,13 @@ class McBopomofoInputMethodController: IMKInputController {
 
         menu.addItem(NSMenuItem.separator())
 
+        let versionItem = NSMenuItem(
+            title: "思脈注音 \(SmaiVersion.displayString)",
+            action: nil,
+            keyEquivalent: "")
+        versionItem.isEnabled = false
+        menu.addItem(versionItem)
+
         menu.addItem(
             withTitle: NSLocalizedString("McBopomofo Preferences", comment: ""),
             action: #selector(showPreferences(_:)), keyEquivalent: "")
@@ -474,7 +492,7 @@ class McBopomofoInputMethodController: IMKInputController {
             withTitle: NSLocalizedString("Check for Updates…", comment: ""),
             action: #selector(checkForUpdate(_:)), keyEquivalent: "")
         menu.addItem(
-            withTitle: NSLocalizedString("About McBopomofo…", comment: ""),
+            withTitle: "關於思脈注音 (\(SmaiVersion.displayString))…",
             action: #selector(showAbout(_:)), keyEquivalent: "")
         return menu
     }
@@ -482,6 +500,7 @@ class McBopomofoInputMethodController: IMKInputController {
     // MARK: - IMKStateSetting protocol methods
 
     override func activateServer(_ client: Any!) {
+        AFMDevLogger.shared.log("SMAI SERVER ACTIVATED: \(SmaiVersion.displayString)")
         cancelAFMRequest()
         UserDefaults.standard.synchronize()
 
@@ -668,7 +687,8 @@ class McBopomofoInputMethodController: IMKInputController {
             }
         }
 
-        if event.type == .keyDown {
+        let isReturnKey = (event.keyCode == UInt16(kVK_Return))
+        if event.type == .keyDown && (!isReturnKey || !(state is InputState.Inputting) || !Preferences.afmAssistEnabled) {
             cancelAFMRequest()
         }
 
@@ -862,6 +882,67 @@ class McBopomofoInputMethodController: IMKInputController {
                 )
                 AFMDevLogger.shared.log("SMART SLASH COMMAND ACTIVATED: '/'")
                 return true
+            }
+
+            // 5. Enter Key handling when composing with AFM Assist
+            let isReturnKey = (event.keyCode == UInt16(kVK_Return))
+            if isReturnKey && !hasCmd && !hasCtrl && !hasOpt && !hasShift {
+                if let inputting = state as? InputState.Inputting {
+                    if handleEnterWithAFMAssist(inputting: inputting, client: client) {
+                        return true
+                    }
+                }
+            }
+
+            // 6. Deep Context Re-evaluation (Option C: Double-Down at sentence end, or Shift+Down)
+            let isDownKey = (event.keyCode == UInt16(kVK_DownArrow))
+            if isDownKey && Preferences.afmAssistEnabled && keyHandler.inputMode == .bopomofo {
+                // Direct shortcut: Shift + Down in Inputting state
+                if hasShift && !hasCmd && !hasCtrl && !hasOpt {
+                    if let inputting = state as? InputState.Inputting {
+                        if triggerDeepContextCorrection(inputting: inputting, client: client) {
+                            return true
+                        }
+                    }
+                }
+
+                // Double-Down at sentence end (Option C):
+                if !hasShift && !hasCmd && !hasCtrl && !hasOpt {
+                    if let candState = state as? InputState.ChoosingCandidate {
+                        let timeDiff = event.timestamp - lastSentenceEndDownTimestamp
+                        if timeDiff > 0 && timeDiff < 0.45 && !lastSentenceEndDownBuffer.isEmpty {
+                            AFMDevLogger.shared.log("DOUBLE-DOWN DETECTED AT SENTENCE END: diff=\(timeDiff)s, sentence='\(lastSentenceEndDownBuffer)'")
+                            lastSentenceEndDownTimestamp = 0
+                            lastSentenceEndDownBuffer = ""
+
+                            // Synthesize ESC to cleanly dismiss candidate window & restore cursor via KeyHandler
+                            let escInput = KeyHandlerInput(
+                                inputText: "\u{1b}",
+                                keyCode: 53,
+                                charCode: 27,
+                                flags: [],
+                                isVerticalMode: false
+                            )
+                            _ = keyHandler.handle(input: escInput, state: candState) { [weak self] newState in
+                                guard let self = self else { return }
+                                self.handle(state: newState, client: client)
+                            } errorCallback: {}
+
+                            if let inputting = self.state as? InputState.Inputting {
+                                if triggerDeepContextCorrection(inputting: inputting, client: client) {
+                                    return true
+                                }
+                            }
+                            return true
+                        }
+                    } else if let inputting = state as? InputState.Inputting {
+                        let bufLen = (inputting.composingBuffer as NSString).length
+                        if inputting.cursorIndex >= bufLen && bufLen >= 2 {
+                            lastSentenceEndDownTimestamp = event.timestamp
+                            lastSentenceEndDownBuffer = inputting.composingBuffer
+                        }
+                    }
+                }
             }
         }
 
@@ -1187,7 +1268,12 @@ class McBopomofoInputMethodController: IMKInputController {
     }
 
     @objc func showAbout(_ sender: Any?) {
-        NSApp.orderFrontStandardAboutPanel(sender)
+        let options: [NSApplication.AboutPanelOptionKey: Any] = [
+            .applicationName: "思脈注音 (Smai)",
+            .applicationVersion: SmaiVersion.current,
+            .version: SmaiVersion.build
+        ]
+        NSApp.orderFrontStandardAboutPanel(options)
         NSApp.activate(ignoringOtherApps: true)
     }
 
@@ -1252,6 +1338,7 @@ extension McBopomofoInputMethodController {
     private func cancelAFMRequest() {
         afmTask?.cancel()
         afmTask = nil
+        isEnterCommitPending = false
         afmRequestGate.invalidate()
     }
 
@@ -1391,6 +1478,260 @@ extension McBopomofoInputMethodController {
             }
         }
         return false
+    }
+
+    private func handleEnterWithAFMAssist(inputting: InputState.Inputting, client: Any!) -> Bool {
+        guard Preferences.afmAssistEnabled,
+              keyHandler.inputMode == .bopomofo,
+              let textClient = client as? IMKTextInput
+        else {
+            return false
+        }
+
+        // If user already pressed Enter once and is waiting for AFM, second Enter commits immediately!
+        if isEnterCommitPending {
+            let textToCommit = inputting.composingBuffer
+            AFMDevLogger.shared.log("ENTER COMMITTED (SECOND ENTER FASTPATH): '\(textToCommit)'")
+            cancelAFMRequest()
+            keyHandler.clear()
+            commit(text: textToCommit, client: textClient)
+            handle(state: InputState.EmptyIgnoringPreviousState(), client: textClient)
+            return true
+        }
+
+        // If the composing buffer was already corrected by AFM, commit it directly!
+        if !inputting.afmHighlightedRanges.isEmpty || inputting.afmHighlightedRange.location != NSNotFound {
+            let textToCommit = inputting.composingBuffer
+            AFMDevLogger.shared.log("ENTER COMMITTED (PRE-CORRECTED AFM): '\(textToCommit)'")
+            cancelAFMRequest()
+            keyHandler.clear()
+            commit(text: textToCommit, client: textClient)
+            handle(state: InputState.EmptyIgnoringPreviousState(), client: textClient)
+            return true
+        }
+
+        let sentence = inputting.composingBuffer
+        let sentenceLen = (sentence as NSString).length
+        guard sentenceLen >= 2, !Self.containsBopomofoOrTone(sentence) else {
+            return false
+        }
+
+        isEnterCommitPending = true
+        let token = afmRequestGate.token()
+        let afmClient = self.afmClient
+
+        AFMDevLogger.shared.log("ENTER COMMITTING WITH AFM: sentence='\(sentence)', afmTaskActive=\(afmTask != nil)")
+
+        // Cancel previous background task to take over the gate
+        afmTask?.cancel()
+
+        // Visual indicator that sentence is finalizing
+        let markLen = (sentence as NSString).length
+        inputting.afmPendingRange = NSRange(location: 0, length: markLen)
+        textClient.setMarkedText(
+            inputting.attributedString,
+            selectionRange: NSMakeRange(Int(inputting.cursorIndex), 0),
+            replacementRange: NSMakeRange(NSNotFound, NSNotFound)
+        )
+
+        let isTerminal = Self.isTerminalApp(textClient)
+        let isAiCli = isTerminal ? Self.isAiCliInForeground() : false
+
+        afmTask = Task { @MainActor [weak self] in
+            guard let self = self else { return }
+
+            let corrected = await withTaskGroup(of: String?.self) { group in
+                group.addTask {
+                    await afmClient.correctSentence(sentence: sentence, isTerminal: isTerminal, isAiCli: isAiCli)
+                }
+                group.addTask {
+                    try? await Task.sleep(nanoseconds: 450_000_000)
+                    return nil
+                }
+                if let first = await group.next() {
+                    group.cancelAll()
+                    return first
+                }
+                return nil
+            }
+
+            guard self.afmRequestGate.isCurrent(token),
+                  self.state === inputting
+            else {
+                return
+            }
+
+            self.isEnterCommitPending = false
+
+            var resultText = sentence
+            if let corr = corrected, corr != sentence {
+                let origNS = sentence as NSString
+                let corrNS = corr as NSString
+                let hasCloze = sentence.contains("??") || sentence.contains("？？")
+                let isPromptOptimization = (
+                    sentence.hasPrefix(">>") || sentence.hasPrefix("》》") || sentence.hasPrefix("。。") || sentence.hasPrefix("..") || sentence.hasPrefix("$$") ||
+                    sentence.hasSuffix(">>") || sentence.hasSuffix("》》") || sentence.hasSuffix("。。") || sentence.hasSuffix("..") || sentence.hasSuffix("$$")
+                ) && Preferences.afmPromptOptimizerEnabled
+                let allowsLengthChange = (hasCloze && Preferences.afmClozeFillingEnabled) || Preferences.afmSemanticFluencyRewriteEnabled || isPromptOptimization
+
+                if allowsLengthChange || origNS.length == corrNS.length {
+                    resultText = corr
+                    AFMDevLogger.shared.log("ENTER AFM CORRECTION APPLIED: '\(sentence)' -> '\(resultText)'")
+                } else {
+                    AFMDevLogger.shared.log("ENTER AFM LENGTH MISMATCH REJECTED: '\(sentence)' -> '\(corr)'")
+                }
+            } else {
+                AFMDevLogger.shared.log("ENTER AFM UNCHANGED OR TIMED OUT: '\(sentence)'")
+            }
+
+            self.keyHandler.clear()
+            self.commit(text: resultText, client: textClient)
+            self.handle(state: InputState.EmptyIgnoringPreviousState(), client: textClient)
+            self.afmTask = nil
+        }
+
+        return true
+    }
+
+    private func triggerDeepContextCorrection(inputting: InputState.Inputting, client: Any!) -> Bool {
+        guard Preferences.afmAssistEnabled,
+              keyHandler.inputMode == .bopomofo,
+              let textClient = client as? IMKTextInput
+        else {
+            return false
+        }
+
+        let sentence = inputting.composingBuffer
+        let sentenceLen = (sentence as NSString).length
+        guard sentenceLen >= 2 else { return false }
+
+        // Cancel previous background task
+        cancelAFMRequest()
+
+        // Visual indicator: Indigo highlight on the entire sentence while deep re-evaluating
+        let markLen = sentenceLen
+        inputting.afmPendingRange = NSRange(location: 0, length: markLen)
+        textClient.setMarkedText(
+            inputting.attributedString,
+            selectionRange: NSMakeRange(Int(inputting.cursorIndex), 0),
+            replacementRange: NSMakeRange(NSNotFound, NSNotFound)
+        )
+        AFMDevLogger.shared.log("DEEP-CONTEXT IN FLIGHT (COLOR CHANGED to INDIGO) sentence='\(sentence)'")
+
+        // Gather context from rolling commit history + client preceding text if possible
+        var precedingContext = RecentCommitHistoryTracker.shared.recentContext(maxLimit: 150)
+
+        let marked = textClient.markedRange()
+        let sel = textClient.selectedRange()
+        let startLoc = (marked.location != NSNotFound) ? marked.location : sel.location
+        if startLoc != NSNotFound && startLoc > 0 {
+            let checkLen = min(startLoc, 100)
+            let searchRange = NSRange(location: startLoc - checkLen, length: checkLen)
+            if let attr = textClient.attributedSubstring(from: searchRange)?.string, !attr.isEmpty {
+                let trimmedAttr = attr.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmedAttr.isEmpty && !precedingContext.contains(trimmedAttr) {
+                    precedingContext = precedingContext.isEmpty ? trimmedAttr : (precedingContext + " " + trimmedAttr)
+                }
+            }
+        }
+
+        let isTerminal = Self.isTerminalApp(textClient)
+        let isAiCli = isTerminal ? Self.isAiCliInForeground() : false
+        let token = afmRequestGate.token()
+        let afmClient = self.afmClient
+
+        AFMDevLogger.shared.log("DEEP-CONTEXT TRIGGERED: sentence='\(sentence)', context='\(precedingContext)'")
+
+        afmTask = Task { @MainActor [weak self] in
+            guard let self = self else { return }
+
+            let corrected = await afmClient.deepContextCorrectSentence(
+                sentence: sentence,
+                precedingContext: precedingContext,
+                isTerminal: isTerminal,
+                isAiCli: isAiCli
+            )
+
+            guard !Task.isCancelled,
+                  self.afmRequestGate.isCurrent(token),
+                  self.state === inputting
+            else {
+                if self.state === inputting {
+                    inputting.afmPendingRange = NSMakeRange(NSNotFound, 0)
+                    textClient.setMarkedText(
+                        inputting.attributedString,
+                        selectionRange: NSMakeRange(Int(inputting.cursorIndex), 0),
+                        replacementRange: NSMakeRange(NSNotFound, NSNotFound)
+                    )
+                }
+                AFMDevLogger.shared.log("DEEP-CONTEXT STALE or CANCELLED token=\(token)")
+                return
+            }
+
+            inputting.afmPendingRange = NSMakeRange(NSNotFound, 0)
+
+            guard let corrected = corrected, corrected != sentence else {
+                textClient.setMarkedText(
+                    inputting.attributedString,
+                    selectionRange: NSMakeRange(Int(inputting.cursorIndex), 0),
+                    replacementRange: NSMakeRange(NSNotFound, NSNotFound)
+                )
+                AFMDevLogger.shared.log("DEEP-CONTEXT UNCHANGED: '\(sentence)'")
+                return
+            }
+
+            let origNS = sentence as NSString
+            let corrNS = corrected as NSString
+            let changedRanges: [NSRange]
+            let newCursorIndex: UInt
+
+            if origNS.length == corrNS.length {
+                var ranges: [NSRange] = []
+                var currentStart: Int? = nil
+                for i in 0..<origNS.length {
+                    if origNS.character(at: i) != corrNS.character(at: i) {
+                        if currentStart == nil { currentStart = i }
+                    } else if let start = currentStart {
+                        ranges.append(NSRange(location: start, length: i - start))
+                        currentStart = nil
+                    }
+                }
+                if let start = currentStart {
+                    ranges.append(NSRange(location: start, length: origNS.length - start))
+                }
+                changedRanges = ranges
+                newCursorIndex = inputting.cursorIndex
+            } else {
+                let diffRange = self.findChangedRange(old: origNS, new: corrNS)
+                changedRanges = [diffRange]
+                newCursorIndex = UInt(corrNS.length)
+            }
+
+            guard !changedRanges.isEmpty else {
+                textClient.setMarkedText(
+                    inputting.attributedString,
+                    selectionRange: NSMakeRange(Int(inputting.cursorIndex), 0),
+                    replacementRange: NSMakeRange(NSNotFound, NSNotFound)
+                )
+                return
+            }
+
+            let newState = InputState.Inputting(
+                composingBuffer: corrected,
+                cursorIndex: newCursorIndex
+            )
+            newState.afmHighlightedRanges = changedRanges.map { NSValue(range: $0) }
+            if let first = changedRanges.first {
+                newState.afmHighlightedRange = first
+            }
+
+            AFMAssistDiagnostics.shared.record(.applied)
+            AFMDevLogger.shared.log("DEEP-CONTEXT APPLIED & HIGHLIGHTED: '\(sentence)' -> '\(corrected)', changedRanges=\(changedRanges)")
+
+            self.handle(state: newState, client: textClient)
+        }
+
+        return true
     }
 
     private func scheduleAFMRequest(
@@ -1707,6 +2048,7 @@ extension McBopomofoInputMethodController {
         }
 
         AFMDevLogger.shared.log("COMMIT text='\(buffer)'")
+        RecentCommitHistoryTracker.shared.append(buffer)
 
         (client as? IMKTextInput)?.insertText(
             buffer, replacementRange: NSRange(location: NSNotFound, length: NSNotFound))
