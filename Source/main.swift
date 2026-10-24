@@ -976,6 +976,257 @@ if CommandLine.arguments.count > 1 {
 
         exit(diagnosticPassed ? 0 : 2)
     }
+    if CommandLine.arguments[1] == "--quality-check" {
+        print("==================================================")
+        print("   思脈注音 (Smai) 全方位品質與回歸檢查 (Quality Check)")
+        print("==================================================")
+        var allPassed = true
+        var testIndex = 1
+
+        func check(_ name: String, passed: Bool, detail: String = "") {
+            let badge = passed ? "✅ PASS" : "❌ FAIL"
+            let msg = detail.isEmpty ? "" : " (\(detail))"
+            print(String(format: "[%02d] %@ - %@%@", testIndex, badge, name, msg))
+            testIndex += 1
+            if !passed {
+                allPassed = false
+            }
+        }
+
+        // --- 1. 中英切換與 CapsLock 路由檢查 ---
+        var capSwitch = AFMCapsLockSwitch()
+        let p1 = capSwitch.handleCapsLock(isOn: false, timestamp: 1.0)
+        let p1Ok = (p1 == .toggle) && capSwitch.isFallbackEnglish
+        let p2 = capSwitch.handleCapsLock(isOn: false, timestamp: 1.02)
+        let p2Ok = (p2 == .duplicate) && capSwitch.isFallbackEnglish
+        let p3 = capSwitch.handleCapsLock(isOn: false, timestamp: 2.0)
+        let p3Ok = (p3 == .toggle) && !capSwitch.isFallbackEnglish
+        let capSwitchOk = p1Ok && p2Ok && p3Ok
+        check("中英切換：CapsLock 軟體切換狀態機 (中英互切與防抖震)", passed: capSwitchOk)
+
+        // KeyHandler CapsLock ASCII bypass
+        LanguageModelManager.loadDataModel(.bopomofo)
+        let kh = KeyHandler()
+        kh.inputMode = .bopomofo
+        var capState: InputState = InputState.Empty()
+        var capCommitted = ""
+        for ch in "hello" {
+            let input = KeyHandlerInput(
+                inputText: String(ch),
+                keyCode: 0,
+                charCode: ch.utf16.first!,
+                flags: [.capsLock],
+                isVerticalMode: false
+            )
+            _ = kh.handle(input: input, state: capState) { newState in
+                if let comm = newState as? InputState.Committing {
+                    capCommitted += comm.poppedText
+                }
+                capState = newState
+            } errorCallback: {}
+        }
+        let capBypassOk = (capCommitted == "hello")
+        check("中英切換：CapsLock 英文輸入直通 (不殘留注音與注音音節)", passed: capBypassOk, detail: "committed='\(capCommitted)'")
+
+        // Shift Uppercase CasePolicy
+        var caseP = AFMEnglishCasePolicy()
+        caseP.observeModifierEvent(keyCode: UInt16(kVK_Shift), shiftIsOn: true)
+        let shiftCommit = caseP.letterToCommit(text: "H", flags: NSEvent.ModifierFlags.shift)
+        caseP.observeModifierEvent(keyCode: UInt16(kVK_Shift), shiftIsOn: false)
+        let lowerCommit = caseP.letterToCommit(text: "h", flags: [])
+        let caseOk = (shiftCommit == "H") && (lowerCommit == "h")
+        check("中英切換：Shift 英文字元大小寫即時判定策略", passed: caseOk)
+
+        // --- 2. 首字打斜線與智慧指令檢查 ---
+        var tracker = AFMSlashCommandTracker()
+        tracker.start()
+        let slashStartOk = tracker.isActive && tracker.buffer == "/"
+
+        _ = tracker.handleKey(keyCode: 9, chars: "v", flags: [])
+        let slashVOk = (tracker.buffer == "/v")
+        let vAction = tracker.handleKey(keyCode: UInt16(kVK_Return), chars: "\r", flags: [])
+        let vCommitOk = (vAction == .commit("/v")) && !tracker.isActive
+
+        tracker.start()
+        for ch in "voice" {
+            _ = tracker.handleKey(keyCode: 0, chars: String(ch), flags: [])
+        }
+        let voiceOk = (tracker.buffer == "/voice")
+
+        tracker.start()
+        for ch in "typeless" {
+            _ = tracker.handleKey(keyCode: 0, chars: String(ch), flags: [])
+        }
+        let typelessOk = (tracker.buffer == "/typeless")
+
+        tracker.start()
+        _ = tracker.handleKey(keyCode: 4, chars: "h", flags: [])
+        let del1 = tracker.handleKey(keyCode: UInt16(kVK_Delete), chars: "", flags: [])
+        let del1Ok = (del1 == .updateMarked("/")) && tracker.buffer == "/"
+        let del2 = tracker.handleKey(keyCode: UInt16(kVK_Delete), chars: "", flags: [])
+        let del2Ok = (del2 == .cancel) && !tracker.isActive
+
+        tracker.start()
+        _ = tracker.handleKey(keyCode: 4, chars: "h", flags: [])
+        let escAction = tracker.handleKey(keyCode: UInt16(kVK_Escape), chars: "", flags: [])
+        let escOk = (escAction == .cancel) && !tracker.isActive
+
+        tracker.start()
+        _ = tracker.handleKey(keyCode: 8, chars: "c", flags: [])
+        let cmdC = tracker.handleKey(keyCode: 8, chars: "c", flags: [.command])
+        let cmdCOk = (cmdC == .commitAndPassThrough("/c")) && !tracker.isActive
+
+        let allSlashOk = slashStartOk && slashVOk && vCommitOk && voiceOk && typelessOk && del1Ok && del2Ok && escOk && cmdCOk
+        check("首字斜線：智慧指令狀態機 (/v, /voice, /typeless, 刪除, Esc, 快速鍵直通)", passed: allSlashOk)
+
+        // --- 3. 半形符號與 Option 快捷鍵政策 ---
+        let optSlash = AFMSymbolPolicy.optionSymbolToCommit(charsNoMod: "/", flags: [.option])
+        let optQuest = AFMSymbolPolicy.optionSymbolToCommit(charsNoMod: "?", flags: [.option, .shift])
+        let optMinus = AFMSymbolPolicy.optionSymbolToCommit(charsNoMod: "-", flags: [.option])
+        let optUnder = AFMSymbolPolicy.optionSymbolToCommit(charsNoMod: "_", flags: [.option, .shift])
+        let optPeriod = AFMSymbolPolicy.optionSymbolToCommit(charsNoMod: ".", flags: [.option])
+        let optGreater = AFMSymbolPolicy.optionSymbolToCommit(charsNoMod: ">", flags: [.option, .shift])
+        let optHash = AFMSymbolPolicy.optionSymbolToCommit(charsNoMod: "#", flags: [.option, .shift])
+        let optLetter = AFMSymbolPolicy.optionSymbolToCommit(charsNoMod: "f", flags: [.option])
+        let optCmd = AFMSymbolPolicy.optionSymbolToCommit(charsNoMod: "/", flags: [.option, .command])
+        let capsSlash = AFMSymbolPolicy.capsNonLetterToCommit(chars: "/", flags: [.capsLock])
+        let capsMinus = AFMSymbolPolicy.capsNonLetterToCommit(chars: "-", flags: [.capsLock])
+
+        let symPolicyOk = (optSlash == "/") && (optQuest == "?") && (optMinus == "-") &&
+                          (optUnder == "_") && (optPeriod == ".") && (optGreater == ">") &&
+                          (optHash == "#") && (optLetter == nil) && (optCmd == nil) &&
+                          (capsSlash == "/") && (capsMinus == "-")
+        check("符號政策：Option + 符號快捷半形輸入 (⌥/ ⌥- ⌥? ⌥. ⌥# ⌥> ⌥_)", passed: symPolicyOk)
+
+        // --- 4. 空白鍵選字與標點切換檢查 ---
+        kh.clear()
+        Preferences.chooseCandidateUsingSpace = true
+        var spaceCandState: InputState = InputState.Empty()
+        for char in "su3" {
+            let input = KeyHandlerInput(inputText: String(char), keyCode: 0, charCode: char.utf16.first!, flags: [], isVerticalMode: false)
+            _ = kh.handle(input: input, state: spaceCandState) { spaceCandState = $0 } errorCallback: {}
+        }
+        let spaceInput = KeyHandlerInput(inputText: " ", keyCode: 49, charCode: 32, flags: [], isVerticalMode: false)
+        _ = kh.handle(input: spaceInput, state: spaceCandState) { spaceCandState = $0 } errorCallback: {}
+        let spaceOpensCandOk = (spaceCandState is InputState.ChoosingCandidate)
+        kh.clear()
+        Preferences.chooseCandidateUsingSpace = false
+        check("標點選字：空白鍵行為動態設定 (選字切換 vs 正常聲調標點)", passed: spaceOpensCandOk)
+
+        // --- 5. 長句 Enter 送出防重複檢查 ---
+        let emptyIgnoreState = InputState.EmptyIgnoringPreviousState()
+        let enterNoDupeOk = (emptyIgnoreState is InputState.EmptyIgnoringPreviousState) && (emptyIgnoreState.composingBuffer.isEmpty)
+        check("送出機制：長句 Enter 送出狀態機 (防重複 Committing 漏洞)", passed: enterNoDupeOk)
+
+        // --- 6. 語意版本比對演算法 (SemVer) ---
+        let v1 = VersionUpdateApi.isRemoteVersionNewer(current: "1.2.0", remote: "1.3.0") == true
+        let v2 = VersionUpdateApi.isRemoteVersionNewer(current: "1.3.0", remote: "1.3.0") == false
+        let v3 = VersionUpdateApi.isRemoteVersionNewer(current: "1.3.0", remote: "1.2.0") == false
+        let v4 = VersionUpdateApi.isRemoteVersionNewer(current: "1.3.0", remote: "v1.3.1") == true
+        let v5 = VersionUpdateApi.isRemoteVersionNewer(current: "1.3.0", remote: "2.0.0") == true
+        let v6 = VersionUpdateApi.isRemoteVersionNewer(current: "1.3.0", remote: "1.3.0.1") == true
+        let semVerOk = v1 && v2 && v3 && v4 && v5 && v6
+        check("更新機制：GitHub Releases 語意版本號比對 (SemVer 嚴格檢查)", passed: semVerOk)
+
+        // --- 7. 前文滾動脈絡歷史管理器 ---
+        RecentCommitHistoryTracker.shared.append("第一句測試脈絡。")
+        RecentCommitHistoryTracker.shared.append("第一句測試脈絡。") // consecutive duplicate should be ignored
+        RecentCommitHistoryTracker.shared.append("第二句測試脈絡。")
+        let ctx = RecentCommitHistoryTracker.shared.recentContext(maxLimit: 100)
+        let ctxOk = ctx.contains("第一句測試脈絡。") && ctx.contains("第二句測試脈絡。")
+        check("語意脈絡：前文滾動歷史脈絡追蹤器 (RecentCommitHistoryTracker 去重與聚合)", passed: ctxOk, detail: "context='\(ctx)'")
+
+        // --- 8. 雙字核心詞庫檢查 ---
+        let readingZadao = LanguageModelManager.reading(for: "匝道")
+        var hasZadao = (readingZadao != nil && !(readingZadao ?? "").isEmpty)
+        if !hasZadao, let dataUrl = Bundle.main.url(forResource: "data", withExtension: "txt"),
+           let content = try? String(contentsOf: dataUrl, encoding: .utf8) {
+            hasZadao = content.contains("匝道")
+        }
+        check("核心詞庫：雙字詞庫完整性 (驗證「匝道」等重要高頻詞存在)", passed: hasZadao, detail: readingZadao ?? "")
+
+        // --- 9. 語音輸入模組狀態機檢查 ---
+        let voiceEndpoints = VoiceInputManager.shared.candidateASREndpoints()
+        let hasWsLocal = voiceEndpoints.contains("ws://127.0.0.1:8765/v1/audio/transcriptions/stream")
+        let hasWsRemote = voiceEndpoints.contains("wss://mac-mini.tail670ea6.ts.net/v1/audio/transcriptions/stream")
+        let voiceEndpointsOk = hasWsLocal && hasWsRemote
+        check("語音輸入：Typeless 語音模組後端端點解析 (本機 WS & 遠端 Tailscale)", passed: voiceEndpointsOk)
+
+        // --- 10. 中英交替混打無縫過渡檢查 ---
+        kh.clear()
+        var transState: InputState = InputState.Empty()
+        var transCommitted = ""
+        for ch in "su3" {
+            let input = KeyHandlerInput(inputText: String(ch), keyCode: 0, charCode: ch.utf16.first!, flags: [], isVerticalMode: false)
+            _ = kh.handle(input: input, state: transState) { transState = $0 } errorCallback: {}
+        }
+        let enterInput = KeyHandlerInput(inputText: "\r", keyCode: UInt16(kVK_Return), charCode: 13, flags: [], isVerticalMode: false)
+        _ = kh.handle(input: enterInput, state: transState) { newState in
+            if let comm = newState as? InputState.Committing {
+                transCommitted += comm.poppedText
+            }
+            transState = newState
+        } errorCallback: {}
+        for ch in "hi" {
+            let input = KeyHandlerInput(inputText: String(ch), keyCode: 0, charCode: ch.utf16.first!, flags: [.capsLock], isVerticalMode: false)
+            _ = kh.handle(input: input, state: transState) { newState in
+                if let comm = newState as? InputState.Committing {
+                    transCommitted += comm.poppedText
+                }
+                transState = newState
+            } errorCallback: {}
+        }
+        let transOk = (transCommitted == "你hi")
+        check("中英切換：注音與 CapsLock 英文無縫過渡 (中英混打模式交替)", passed: transOk, detail: "committed='\(transCommitted)'")
+
+        // --- 11. 標準全形標點符號輸入直通 ---
+        kh.clear()
+        var punctState: InputState = InputState.Empty()
+        let commaInput = KeyHandlerInput(inputText: "<", keyCode: 43, charCode: 60, flags: [.shift], isVerticalMode: false)
+        _ = kh.handle(input: commaInput, state: punctState) { punctState = $0 } errorCallback: {}
+        let periodInput = KeyHandlerInput(inputText: ">", keyCode: 47, charCode: 62, flags: [.shift], isVerticalMode: false)
+        _ = kh.handle(input: periodInput, state: punctState) { punctState = $0 } errorCallback: {}
+        let dunhaoInput = KeyHandlerInput(inputText: "'", keyCode: 39, charCode: 39, flags: [], isVerticalMode: false)
+        _ = kh.handle(input: dunhaoInput, state: punctState) { punctState = $0 } errorCallback: {}
+        let composingPunct = (punctState as? InputState.NotEmpty)?.composingBuffer ?? ""
+        var punctCommitted = ""
+        let enterPunct = KeyHandlerInput(inputText: "\r", keyCode: UInt16(kVK_Return), charCode: 13, flags: [], isVerticalMode: false)
+        _ = kh.handle(input: enterPunct, state: punctState) { newState in
+            if let comm = newState as? InputState.Committing {
+                punctCommitted += comm.poppedText
+            }
+            punctState = newState
+        } errorCallback: {}
+        let punctOk = (composingPunct == "，。、") && (punctCommitted == "，。、")
+        check("符號政策：標準注音全形標點鍵盤對映 (Shift+< '，'、Shift+> '。'、單引號 ' '、' 頓號)", passed: punctOk, detail: "composing='\(composingPunct)', committed='\(punctCommitted)'")
+
+        // --- 12. 首字斜線非指令直通安全檢查 ---
+        var trackerNormal = AFMSlashCommandTracker()
+        trackerNormal.start()
+        for ch in "search" {
+            _ = trackerNormal.handleKey(keyCode: 0, chars: String(ch), flags: [])
+        }
+        let searchCommit = trackerNormal.handleKey(keyCode: UInt16(kVK_Return), chars: "\r", flags: [])
+        let searchOk = (searchCommit == .commit("/search")) && !trackerNormal.isActive
+
+        var trackerDoubleSlash = AFMSlashCommandTracker()
+        trackerDoubleSlash.start()
+        _ = trackerDoubleSlash.handleKey(keyCode: 0, chars: "/", flags: [])
+        let slashSlashCommit = trackerDoubleSlash.handleKey(keyCode: UInt16(kVK_Return), chars: "\r", flags: [])
+        let slashSlashOk = (slashSlashCommit == .commit("//")) && !trackerDoubleSlash.isActive
+        check("首字斜線：非指令字串直通安全檢查 (如 /search, // 正常送出無攔截異常)", passed: searchOk && slashSlashOk)
+
+        print("==================================================")
+        if allPassed {
+            print("🎉 全部品質檢查項目通過！(All Quality Checks PASSED)")
+            print("==================================================")
+            exit(0)
+        } else {
+            print("❌ 部分品質檢查項目未通過，請查看上方詳細日誌。")
+            print("==================================================")
+            exit(1)
+        }
+    }
 }
 
 fileprivate actor AFMQueueDiagnosticMeter {

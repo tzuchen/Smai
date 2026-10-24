@@ -14,7 +14,7 @@ cd "$REPO_ROOT"
 
 deploy() {
     START_TIME=$(python3 -c 'import time; print(time.time())')
-    echo "⚡️ [1/4] 增量編譯 (Incremental Build arm64)..."
+    echo "⚡️ [1/5] 增量編譯 (Incremental Build arm64)..."
     
     xcodebuild -project McBopomofo.xcodeproj \
                -scheme McBopomofo \
@@ -26,7 +26,10 @@ deploy() {
                CODE_SIGNING_REQUIRED=NO \
                -quiet
 
-    echo "📦 [2/4] 同步至輸入法目錄..."
+    echo "🧪 [2/5] 執行自動化品質檢查 (Quality Check)..."
+    "$BUILT_APP/Contents/MacOS/Smai" --quality-check
+
+    echo "📦 [3/5] 同步至輸入法目錄..."
     if [ ! -w "$TARGET_APP" ]; then
         # 若無寫入權限，使用 sudo 拷貝（建議執行 sudo chown -R $(whoami) "/Library/Input Methods/Smai.app" 免密）
         sudo /usr/bin/ditto "$BUILT_APP" "$TARGET_APP"
@@ -36,7 +39,7 @@ deploy() {
         /usr/bin/codesign --force --deep --sign - "$TARGET_APP" 2>/dev/null || true
     fi
 
-    echo "🔄 [3/4] 重啟思脈注音進程..."
+    echo "🔄 [4/5] 重啟思脈注音進程..."
     killall -9 Smai 2>/dev/null || true
     killall -9 McBopomofo 2>/dev/null || true
     sleep 0.3
@@ -44,7 +47,7 @@ deploy() {
 
     END_TIME=$(python3 -c 'import time; print(time.time())')
     ELAPSED=$(python3 -c "print(f'{$END_TIME - $START_TIME:.2f}')")
-    echo "✅ [4/4] 思脈注音 v1.3.0 (Build 20261024) 熱部屬完成！耗時: ${ELAPSED}s"
+    echo "✅ [5/5] 思脈注音 (Quality Check 通過) 熱部屬完成！耗時: ${ELAPSED}s"
 }
 
 if [ "$1" == "--watch" ]; then
