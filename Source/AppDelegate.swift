@@ -82,6 +82,7 @@ struct VersionUpdateApi {
     static func check(
         forced: Bool, callback: @escaping (Result<VersionUpdateApiResult, Error>) -> Void
     ) -> URLSessionTask? {
+        AFMDevLogger.shared.log("VERSION UPDATE API: checking endpoint: \(githubApiEndpoint), currentVersion=\(SmaiVersion.current), forced=\(forced)")
         guard let url = URL(string: githubApiEndpoint) else {
             return nil
         }
@@ -93,6 +94,8 @@ struct VersionUpdateApi {
         request.setValue("Smai-Input-Method/\(SmaiVersion.current)", forHTTPHeaderField: "User-Agent")
 
         let task = URLSession.shared.dataTask(with: request) { data, response, error in
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+            AFMDevLogger.shared.log("VERSION UPDATE API: response received, status=\(statusCode), error=\(error?.localizedDescription ?? "none")")
             if let error = error {
                 DispatchQueue.main.async {
                     forced
@@ -227,8 +230,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, NonModalAlertWindowControlle
         checkForUpdate(forced: false)
     }
 
+    @objc(sharedInstance)
+    static private(set) var shared: AppDelegate?
+
+    override init() {
+        super.init()
+        AppDelegate.shared = self
+    }
+
+    @objc(checkForUpdate:)
+    func checkForUpdate(_ sender: Any?) {
+        checkForUpdate(forced: true)
+    }
+
     @objc(checkForUpdateForced:)
     func checkForUpdate(forced: Bool) {
+        AFMDevLogger.shared.log("APPDELEGATE CHECK FOR UPDATE: forced=\(forced), checkTaskBusy=\(checkTask != nil)")
         if checkTask != nil {
             // busy
             return

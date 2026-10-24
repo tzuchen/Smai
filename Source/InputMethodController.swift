@@ -502,15 +502,20 @@ class McBopomofoInputMethodController: IMKInputController {
         menu.addItem(
             withTitle: NSLocalizedString("McBopomofo Preferences", comment: ""),
             action: #selector(showPreferences(_:)), keyEquivalent: "")
-        menu.addItem(
+        let restartItem = menu.addItem(
             withTitle: NSLocalizedString("Restart Smai", comment: ""),
             action: #selector(restartSmai(_:)), keyEquivalent: "")
-        menu.addItem(
+        restartItem.target = self
+
+        let updateItem = menu.addItem(
             withTitle: NSLocalizedString("Check for Updates…", comment: ""),
             action: #selector(checkForUpdate(_:)), keyEquivalent: "")
-        menu.addItem(
+        updateItem.target = self
+
+        let aboutItem = menu.addItem(
             withTitle: "關於思脈注音 (\(SmaiVersion.displayString))…",
             action: #selector(showAbout(_:)), keyEquivalent: "")
+        aboutItem.target = self
         return menu
     }
 
@@ -1350,7 +1355,12 @@ class McBopomofoInputMethodController: IMKInputController {
     }
 
     @objc func checkForUpdate(_ sender: Any?) {
-        (NSApp.delegate as? AppDelegate)?.checkForUpdate(forced: true)
+        AFMDevLogger.shared.log("MENU ITEM CHECK FOR UPDATE TRIGGERED")
+        if let appDelegate = (NSApp.delegate as? AppDelegate) ?? AppDelegate.shared {
+            appDelegate.checkForUpdate(forced: true)
+        } else {
+            AFMDevLogger.shared.log("CHECK FOR UPDATE: AppDelegate instance not found")
+        }
     }
 
     @objc func openUserPhrases(_ sender: Any?) {
