@@ -694,6 +694,15 @@ private struct AdvancedPreferencesView: View {
                         Toggle(localized("Punctuation Normalization"), isOn: $preferences.afmPunctuationFixEnabled)
 
                         Toggle(localized("Semantic Fluency Rewrite"), isOn: $preferences.afmSemanticFluencyRewriteEnabled)
+
+                        Toggle(localized("Typeless Voice Input (/v, /w, /tr, ⌥V)"), isOn: $preferences.afmVoiceInputEnabled)
+                        if preferences.afmVoiceInputEnabled {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Toggle(localized("Push-to-Talk (Hold ⌥V to speak, release to send)"), isOn: $preferences.afmVoicePushToTalkEnabled)
+                                Toggle(localized("Audio Sound Feedback (Chimes on start/stop/cancel)"), isOn: $preferences.afmVoiceFeedbackSoundEnabled)
+                            }
+                            .padding(.leading, 16)
+                        }
                     }
                     .disabled(!preferences.afmAssistEnabled)
                     .padding(.leading, 16)

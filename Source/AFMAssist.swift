@@ -308,14 +308,22 @@ internal struct AFMAssistClient: Sendable {
 
     func typelessPolish(
         rawTranscript: String,
-        precedingContext: String = ""
+        precedingContext: String = "",
+        mode: VoiceMode = .dictate,
+        targetAppBundleID: String? = nil,
+        targetAppName: String? = nil,
+        customPhrases: [String] = []
     ) async -> String? {
         let trimmed = rawTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         return await AFMRequestCoordinator.shared.run {
             await self.performTypelessPolish(
                 rawTranscript: trimmed,
-                precedingContext: precedingContext
+                precedingContext: precedingContext,
+                mode: mode,
+                targetAppBundleID: targetAppBundleID,
+                targetAppName: targetAppName,
+                customPhrases: customPhrases
             )
         }
     }
@@ -580,7 +588,11 @@ internal struct AFMAssistClient: Sendable {
 
     private func performTypelessPolish(
         rawTranscript: String,
-        precedingContext: String
+        precedingContext: String,
+        mode: VoiceMode,
+        targetAppBundleID: String?,
+        targetAppName: String?,
+        customPhrases: [String]
     ) async -> String? {
         let qwenCandidates = AFMEndpointResolver.shared.qwenEndpoints()
         for endpoint in qwenCandidates {
@@ -589,6 +601,10 @@ internal struct AFMAssistClient: Sendable {
             if let result = await performTypelessPolishWithEndpoint(
                 rawTranscript: rawTranscript,
                 precedingContext: precedingContext,
+                mode: mode,
+                targetAppBundleID: targetAppBundleID,
+                targetAppName: targetAppName,
+                customPhrases: customPhrases,
                 endpoint: endpoint,
                 isQwen: true
             ) {
@@ -606,6 +622,10 @@ internal struct AFMAssistClient: Sendable {
             if let result = await performTypelessPolishWithEndpoint(
                 rawTranscript: rawTranscript,
                 precedingContext: precedingContext,
+                mode: mode,
+                targetAppBundleID: targetAppBundleID,
+                targetAppName: targetAppName,
+                customPhrases: customPhrases,
                 endpoint: endpoint,
                 isQwen: false
             ) {
@@ -618,6 +638,10 @@ internal struct AFMAssistClient: Sendable {
     private func performTypelessPolishWithEndpoint(
         rawTranscript: String,
         precedingContext: String,
+        mode: VoiceMode,
+        targetAppBundleID: String?,
+        targetAppName: String?,
+        customPhrases: [String],
         endpoint: String,
         isQwen: Bool
     ) async -> String? {
@@ -629,31 +653,79 @@ internal struct AFMAssistClient: Sendable {
             var request = URLRequest(url: url)
             request.httpMethod = "POST"
             let isCachedWorking = (endpoint == AFMEndpointResolver.shared.cachedWorkingURL)
-            request.timeoutInterval = isCachedWorking ? 6.0 : 3.5
+            let baseTimeout = (mode == .helpMeWrite ? 12.0 : 4.5)
+            request.timeoutInterval = isCachedWorking ? (baseTimeout + 2.0) : baseTimeout
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-            let sysPrompt = """
-            你是繁體中文「Typeless 智慧語音輸入後製專家」。你的任務是將使用者用語音口述辨識出來的原始字串，重構成通順、精準、專業的繁體中文書面文字。
+            let sysPrompt: String
+            switch mode {
+            case .helpMeWrite:
+                sysPrompt = """
+                你是繁體中文「Typeless 智慧寫作與代碼助理」。使用者的輸入是透過語音下達的寫作、回覆、摘要、草稿或程式碼生成指令。
+                你的任務是：直接執行使用者的指令，產出高品質、專業、格式得體的繁體中文或程式碼成果。
 
-            重構規則：
-            1. 【去除冗言贅字】：徹底過濾口語中的「呃」、「那個」、「然後」、「就是說」、「嗯」等無意義填補詞。
-            2. 【理解改口修正】：使用者說話時若有臨時修正、改口（例如「不對」、「改為」、「我是說」、「等等」），務必理解其最終意圖，捨棄被推翻的舊內容，只保留並整合最終定案的語意。
-            3. 【專業格式與標點】：自動補齊正確標點符號；英文專有名詞、數字、時間格式自然規範化（例如 PR、API、10:00）；若為口述步驟或列點，請整理為乾淨條列式。
-            4. 【參考前文脈絡】：若有提供前文脈絡，請保持主題與專有名詞一致性。
-            5. 【嚴格直接輸出】：只輸出潤飾重構後的最終文字，嚴禁添加任何前綴、引號、說明、問候或客套話。
-            """
+                原則：
+                1. 【直接執行生成】：不要重複使用者的口述指令，不要只進行謄打，而是真正產出其要求之信件、文章、回覆、條列清單或代碼。
+                2. 【去口語化】：過濾語音中的口頭指令詞（如「幫我寫」、「請產生」），直接輸出最終內容成品。
+                3. 【格式結構優雅】：根據要求適當使用段落、條列點或程式碼區塊。
+                4. 【嚴格直接輸出】：只輸出生成後的內容，嚴禁添加任何「好的，以下是...」、「這是為您撰寫的」等客套廢話或引號。
+                """
+            case .translate:
+                sysPrompt = """
+                你是專業「即時多國語言口語翻譯專家」。
+                你的任務是：將使用者口述內容精確翻譯。
+                - 若原文為中文，翻譯為精準道地的英文（或口述中指定之語言如日文）。
+                - 若原文為英文或其他外語，翻譯為道地自然之繁體中文（台灣習慣用語）。
+                - 專有名詞、縮寫與數字保持標準正確格式。
+                - 嚴格直接輸出翻譯後的結果，嚴禁添加任何多餘說明、引號或問候。
+                """
+            case .dictate:
+                sysPrompt = """
+                你是繁體中文「Typeless 智慧語音輸入後製專家」。你的任務是將使用者用語音口述辨識出來的原始字串，重構成通順、精準、專業的繁體中文書面文字。
 
-            let userPrompt: String
-            if !precedingContext.isEmpty {
-                userPrompt = "【前文脈絡】：\(precedingContext)\n【語音輸入】：\(rawTranscript)\n輸出："
-            } else {
-                userPrompt = "【語音輸入】：\(rawTranscript)\n輸出："
+                重構規則：
+                1. 【去除冗言贅字】：徹底過濾口語中的「呃」、「那個」、「然後」、「就是說」、「嗯」等無意義填補詞。
+                2. 【理解改口修正】：使用者說話時若有臨時修正、改口（例如「不對」、「改為」、「我是說」、「等等」），務必理解其最終意圖，捨棄被推翻的舊內容，只保留並整合最終定案的語意。
+                3. 【專業格式與標點】：自動補齊正確標點符號；英文專有名詞、數字、時間格式自然規範化（例如 PR、API、10:00）；若為口述步驟或列點，請整理為乾淨條列式。
+                4. 【參考前文脈絡與專屬詞庫】：保持主題與專有名詞一致性。
+                5. 【嚴格直接輸出】：只輸出潤飾重構後的最終文字，嚴禁添加任何前綴、引號、說明、問候或客套話。
+                """
             }
 
+            var promptSections: [String] = []
+
+            if let appName = targetAppName, !appName.isEmpty {
+                let lowerBid = (targetAppBundleID ?? "").lowercased()
+                if lowerBid.contains("slack") || lowerBid.contains("line") || lowerBid.contains("discord") || lowerBid.contains("chat") || lowerBid.contains("message") {
+                    promptSections.append("【應用情境】：即時通訊軟體（\(appName)）。語氣簡潔明快、自然對話、口吻親切，適合短訊傳送。")
+                } else if lowerBid.contains("mail") || lowerBid.contains("outlook") || lowerBid.contains("notes") || lowerBid.contains("pages") {
+                    promptSections.append("【應用情境】：郵件與公文文書（\(appName)）。段落分明、全形標點標準、正式禮貌得體。")
+                } else if lowerBid.contains("xcode") || lowerBid.contains("code") || lowerBid.contains("terminal") || lowerBid.contains("iterm") || lowerBid.contains("cursor") {
+                    promptSections.append("【應用情境】：程式開發與終端環境（\(appName)）。英文名詞保持標準大小寫（如 API, PR, HTTP, Git），代碼與變數格式精準。")
+                } else {
+                    promptSections.append("【應用情境】：\(appName)。保持通順繁體中文風格。")
+                }
+            }
+
+            if !customPhrases.isEmpty {
+                let phrasesStr = customPhrases.prefix(20).joined(separator: ", ")
+                promptSections.append("【個人專屬詞庫】：\(phrasesStr)（若語音中出現同音或相近音，優先對齊專屬詞庫）")
+            }
+
+            if !precedingContext.isEmpty {
+                promptSections.append("【前文脈絡】：\(precedingContext)")
+            }
+
+            promptSections.append("【語音輸入】：\(rawTranscript)")
+            promptSections.append("輸出：")
+
+            let userPrompt = promptSections.joined(separator: "\n")
+
+            let estimatedTokens = max(64, min(384, rawTranscript.utf16.count * 3 + 64))
             var body: [String: Any] = [
                 "model": isQwen ? "spark-vllm-docker" : "system",
                 "temperature": 0.1,
-                "max_tokens": 512,
+                "max_tokens": (mode == .helpMeWrite ? 384 : estimatedTokens),
                 "stream": false,
                 "messages": [
                     ["role": "system", "content": sysPrompt],
@@ -668,7 +740,7 @@ internal struct AFMAssistClient: Sendable {
 
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
             let tag = isQwen ? "TYPELESS-QWEN" : "TYPELESS-AFM"
-            AFMDevLogger.shared.log("TYPELESS REQUEST (\(tag)) [\(endpoint)]: '\(rawTranscript)'")
+            AFMDevLogger.shared.log("TYPELESS REQUEST (\(tag)) [mode=\(mode.rawValue), endpoint=\(endpoint)]: '\(rawTranscript)'")
 
             let (data, response) = try await session.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse,
@@ -702,7 +774,10 @@ internal struct AFMAssistClient: Sendable {
             "【輸出】：", "【輸出】:", "輸出：", "輸出:",
             "【結果】：", "【結果】:", "結果：", "結果:",
             "【潤飾】：", "【潤飾】:", "潤飾：", "潤飾:",
-            "【重構】：", "【重構】:", "重構：", "重構:"
+            "【重構】：", "【重構】:", "重構：", "重構:",
+            "【寫作】：", "【寫作】:", "寫作：", "寫作:",
+            "【回覆】：", "【回覆】:", "回覆：", "回覆:",
+            "【翻譯】：", "【翻譯】:", "翻譯：", "翻譯:"
         ] {
             if t.hasPrefix(prefix) {
                 t = String(t.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)

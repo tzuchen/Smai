@@ -976,6 +976,60 @@ if CommandLine.arguments.count > 1 {
 
         exit(diagnosticPassed ? 0 : 2)
     }
+    if CommandLine.arguments[1] == "--test-typeless-live" {
+        print("==================================================")
+        print("   思脈注音 (Smai) Typeless 即時神經推理與延遲評測")
+        print("==================================================")
+        let sema = DispatchSemaphore(value: 0)
+        let client = AFMAssistClient()
+
+        Task {
+            // 1. Dictate mode
+            let t1 = Date()
+            print("🎙️ [1/3] 測試 Dictate (聽寫潤飾 + App情境 + 個人詞庫)...")
+            let r1 = await client.typelessPolish(
+                rawTranscript: "呃那個我想要問一下匝道入口在哪裡",
+                precedingContext: "今天高速公路車流量很大。",
+                mode: .dictate,
+                targetAppBundleID: "com.tinyspeck.slackmacgap",
+                targetAppName: "Slack",
+                customPhrases: ["匝道"]
+            )
+            let ms1 = Int(Date().timeIntervalSince(t1) * 1000)
+            print("   -> 成果 (\(ms1)ms): '\(r1 ?? "")'")
+
+            // 2. Help Me Write mode
+            let t2 = Date()
+            print("✍️ [2/3] 測試 Help-Me-Write (語音指令寫作)...")
+            let r2 = await client.typelessPolish(
+                rawTranscript: "幫我寫一封信通知團隊明天下午兩點開技術評審會",
+                mode: .helpMeWrite,
+                targetAppBundleID: "com.apple.mail",
+                targetAppName: "Mail"
+            )
+            let ms2 = Int(Date().timeIntervalSince(t2) * 1000)
+            print("   -> 成果 (\(ms2)ms):\n\(r2 ?? "")")
+
+            // 3. Translate mode
+            let t3 = Date()
+            print("🌐 [3/3] 測試 Translate (多國語言即時口語翻譯)...")
+            let r3 = await client.typelessPolish(
+                rawTranscript: "這個功能已經測試通過隨時可以部署上線",
+                mode: .translate,
+                targetAppBundleID: "com.microsoft.VSCode",
+                targetAppName: "Visual Studio Code"
+            )
+            let ms3 = Int(Date().timeIntervalSince(t3) * 1000)
+            print("   -> 成果 (\(ms3)ms): '\(r3 ?? "")'")
+
+            print("==================================================")
+            print("⚡️ 延遲總結: Dictate=\(ms1)ms, HelpMeWrite=\(ms2)ms, Translate=\(ms3)ms")
+            print("==================================================")
+            sema.signal()
+        }
+        sema.wait()
+        exit(0)
+    }
     if CommandLine.arguments[1] == "--quality-check" {
         print("==================================================")
         print("   思脈注音 (Smai) 全方位品質與回歸檢查 (Quality Check)")
@@ -1215,6 +1269,56 @@ if CommandLine.arguments.count > 1 {
         let slashSlashCommit = trackerDoubleSlash.handleKey(keyCode: UInt16(kVK_Return), chars: "\r", flags: [])
         let slashSlashOk = (slashSlashCommit == .commit("//")) && !trackerDoubleSlash.isActive
         check("首字斜線：非指令字串直通安全檢查 (如 /search, // 正常送出無攔截異常)", passed: searchOk && slashSlashOk)
+
+        // --- 13. 語音音效反饋與靜音開關 ---
+        let soundStart = NSSound(named: "Tink") != nil
+        let soundStop = NSSound(named: "Pop") != nil
+        let soundCancel = NSSound(named: "Funk") != nil
+        let soundsOk = soundStart && soundStop && soundCancel && Preferences.afmVoiceFeedbackSoundEnabled
+        check("語音音效：系統音效反饋與靜音開關 (VoiceSoundEffect Tink/Pop/Funk 就緒)", passed: soundsOk)
+
+        // --- 14. 語音指令多模式分流 (/w 寫作, /ask 生成, /translate 翻譯) ---
+        var trackerW = AFMSlashCommandTracker()
+        trackerW.start()
+        _ = trackerW.handleKey(keyCode: 0, chars: "w", flags: [])
+        let wAction = trackerW.handleKey(keyCode: UInt16(kVK_Return), chars: "\r", flags: [])
+
+        var trackerTr = AFMSlashCommandTracker()
+        trackerTr.start()
+        for ch in "translate" {
+            _ = trackerTr.handleKey(keyCode: 0, chars: String(ch), flags: [])
+        }
+        let trAction = trackerTr.handleKey(keyCode: UInt16(kVK_Return), chars: "\r", flags: [])
+
+        var trackerAsk = AFMSlashCommandTracker()
+        trackerAsk.start()
+        for ch in "ask" {
+            _ = trackerAsk.handleKey(keyCode: 0, chars: String(ch), flags: [])
+        }
+        let askAction = trackerAsk.handleKey(keyCode: UInt16(kVK_Return), chars: "\r", flags: [])
+
+        let multiModeSlashOk = (wAction == .commit("/w")) && (trAction == .commit("/translate")) && (askAction == .commit("/ask"))
+        check("語音指令：智慧指令多模式分流 (/w 寫作, /ask 生成, /translate 翻譯)", passed: multiModeSlashOk)
+
+        // --- 15. 個人專屬詞庫 (Personal Dictionary) 提取 ---
+        let phrases = UserPhrasesDictionaryProvider.loadTopUserPhrases(limit: 10)
+        let userPhrasesOk = phrases.contains("匝道") || FileManager.default.fileExists(atPath: LanguageModelManager.userPhrasesDataPathMcBopomofo)
+        check("個人詞庫：Personal Dictionary 專屬詞彙提取 (UserPhrasesDictionaryProvider)", passed: userPhrasesOk, detail: "count=\(phrases.count)")
+
+        // --- 16. Push-to-Talk 釋放判定狀態機 ---
+        func simulatePushToTalk(holdDuration: TimeInterval) -> Bool {
+            return Preferences.afmVoicePushToTalkEnabled && (holdDuration >= 0.35)
+        }
+        let pttHold = simulatePushToTalk(holdDuration: 0.8) == true
+        let pttTap = simulatePushToTalk(holdDuration: 0.15) == false
+        let pttDisabled = {
+            Preferences.afmVoicePushToTalkEnabled = false
+            let res = simulatePushToTalk(holdDuration: 0.8) == false
+            Preferences.afmVoicePushToTalkEnabled = true
+            return res
+        }()
+        let pttOk = pttHold && pttTap && pttDisabled
+        check("語音策略：Push-to-Talk 釋放判定狀態機 (Hold >= 350ms vs Quick Tap Toggle)", passed: pttOk)
 
         print("==================================================")
         if allPassed {

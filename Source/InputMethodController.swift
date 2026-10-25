@@ -326,6 +326,26 @@ class McBopomofoInputMethodController: IMKInputController {
     private static var capsLockSwitch = AFMCapsLockSwitch()
     private static var casePolicy = AFMEnglishCasePolicy()
     private var slashTracker = AFMSlashCommandTracker()
+    private var voiceKeyDownTimestamp: Date?
+    private var voiceStartedByHold: Bool = false
+    private var activeVoiceMode: VoiceMode = .dictate
+
+    private func checkPushToTalkRelease() -> Bool {
+        guard VoiceInputManager.shared.isRecordingOrProcessing, voiceStartedByHold else { return false }
+        if let downTime = voiceKeyDownTimestamp {
+            let elapsed = Date().timeIntervalSince(downTime)
+            if Preferences.afmVoicePushToTalkEnabled && elapsed >= 0.35 {
+                voiceStartedByHold = false
+                voiceKeyDownTimestamp = nil
+                AFMDevLogger.shared.log("PUSH-TO-TALK: Released after \(String(format: "%.2f", elapsed))s, stopping & polishing...")
+                VoiceInputManager.shared.stopAndPolish()
+                return true
+            }
+        }
+        voiceStartedByHold = false
+        voiceKeyDownTimestamp = nil
+        return false
+    }
 
     private func resetSlashMarkedText(client: Any?) {
         (client as? IMKTextInput)?.setMarkedText(
@@ -746,6 +766,11 @@ class McBopomofoInputMethodController: IMKInputController {
                 return false
             }
 
+            let isVKey = (event.keyCode == UInt16(kVK_ANSI_V))
+            if isVKey && checkPushToTalkRelease() {
+                return true
+            }
+
             if state is InputState.Empty {
                 return false
             }
@@ -759,6 +784,12 @@ class McBopomofoInputMethodController: IMKInputController {
         }
 
         if event.type == .flagsChanged {
+            if !event.modifierFlags.contains(.option) {
+                if checkPushToTalkRelease() {
+                    return true
+                }
+            }
+
             let functionKeyKeyboardLayoutID = Preferences.functionKeyboardLayout
             let basisKeyboardLayoutID = Preferences.basisKeyboardLayout
 
@@ -807,9 +838,13 @@ class McBopomofoInputMethodController: IMKInputController {
                 let isOptV = (event.keyCode == UInt16(kVK_ANSI_V)) && hasOpt && !hasCmd && !hasCtrl
 
                 if isReturn || isOptV {
+                    voiceStartedByHold = false
+                    voiceKeyDownTimestamp = nil
                     VoiceInputManager.shared.stopAndPolish()
                     return true
                 } else if isEscape {
+                    voiceStartedByHold = false
+                    voiceKeyDownTimestamp = nil
                     VoiceInputManager.shared.cancel()
                     (client as? IMKTextInput)?.setMarkedText(
                         "",
@@ -821,10 +856,10 @@ class McBopomofoInputMethodController: IMKInputController {
                 return true
             }
 
-            // Voice Shortcut: Option + V toggles voice input when in Bopomofo mode
+            // Voice Shortcut: Option + V toggles/holds voice input when in Bopomofo mode
             let isVKey = (event.keyCode == UInt16(kVK_ANSI_V))
             if isVKey && hasOpt && !hasCmd && !hasCtrl {
-                toggleVoiceInput(client)
+                toggleVoiceInput(client, mode: .dictate)
                 return true
             }
 
@@ -843,9 +878,22 @@ class McBopomofoInputMethodController: IMKInputController {
                     self.resetSlashMarkedText(client: client)
                     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
                     if trimmed == "/v" || trimmed == "/voice" || trimmed == "/typeless" {
-                        self.startVoiceInput(client: client)
+                        self.startVoiceInput(client: client, mode: .dictate)
                         return true
                     }
+                    if trimmed == "/w" || trimmed == "/write" || trimmed == "/ask" {
+                        self.startVoiceInput(client: client, mode: .helpMeWrite)
+                        return true
+                    }
+                    if trimmed == "/tr" || trimmed == "/trans" || trimmed == "/translate" {
+                        self.startVoiceInput(client: client, mode: .translate)
+                        return true
+                    }
+                    if let client = client as? IMKTextInput {
+                        self.commit(text: text, client: client)
+                    }
+                    AFMDevLogger.shared.log("SLASH COMMAND COMMITTED: '\(text)'")
+                    return true
                     if let client = client as? IMKTextInput {
                         self.commit(text: text, client: client)
                     }
@@ -1266,14 +1314,22 @@ class McBopomofoInputMethodController: IMKInputController {
 
     @objc func toggleVoiceInput(_ sender: Any?) {
         let textClient = (currentClient as? IMKTextInput) ?? (self.client() as? IMKTextInput)
+        toggleVoiceInput(textClient, mode: .dictate)
+    }
+
+    private func toggleVoiceInput(_ client: Any?, mode: VoiceMode = .dictate) {
         if VoiceInputManager.shared.isRecordingOrProcessing {
+            voiceStartedByHold = false
+            voiceKeyDownTimestamp = nil
             VoiceInputManager.shared.stopAndPolish()
         } else {
-            startVoiceInput(client: textClient)
+            voiceKeyDownTimestamp = Date()
+            voiceStartedByHold = true
+            startVoiceInput(client: client, mode: mode)
         }
     }
 
-    func startVoiceInput(client: Any?) {
+    func startVoiceInput(client: Any?, mode: VoiceMode = .dictate) {
         guard let textClient = client as? IMKTextInput else { return }
 
         // If composing, commit current composition first
@@ -1281,27 +1337,60 @@ class McBopomofoInputMethodController: IMKInputController {
             self.commitComposition(textClient)
         }
         slashTracker.reset()
+        self.activeVoiceMode = mode
+
+        var bundleID: String? = nil
+        var appName: String? = nil
+        bundleID = textClient.bundleIdentifier()
+        if bundleID == nil || bundleID?.isEmpty == true {
+            bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+            appName = NSWorkspace.shared.frontmostApplication?.localizedName
+        } else if let bid = bundleID {
+            let apps = NSRunningApplication.runningApplications(withBundleIdentifier: bid)
+            appName = apps.first?.localizedName ?? NSWorkspace.shared.frontmostApplication?.localizedName
+        }
 
         let context = RecentCommitHistoryTracker.shared.recentContext(maxLimit: 120)
 
+        let modePrefix: String
+        let listeningHint: String
+        let polishingHint: String
+        switch mode {
+        case .dictate:
+            modePrefix = "🎙️ [Typeless 聽寫]"
+            listeningHint = "說完放開或按 Enter 送出"
+            polishingHint = "✨ [Typeless AI 思考潤飾中...]"
+        case .helpMeWrite:
+            modePrefix = "✍️ [Typeless 寫作]"
+            listeningHint = "請口述寫作/回覆/生成任務"
+            polishingHint = "✨ [Typeless AI 寫作執行中...]"
+        case .translate:
+            modePrefix = "🌐 [Typeless 翻譯]"
+            listeningHint = "請說出欲翻譯語句"
+            polishingHint = "✨ [Typeless AI 即時翻譯中...]"
+        }
+
         VoiceInputManager.shared.start(
+            mode: mode,
+            targetAppBundleID: bundleID,
+            targetAppName: appName,
             precedingContext: context,
             onStateChange: { state in
                 switch state {
                 case .requestingPermission:
                     textClient.setMarkedText(
-                        "🎙️ [Typeless 請求麥克風權限中...]",
+                        "\(modePrefix) 請求麥克風權限中...",
                         selectionRange: NSRange(location: 0, length: 0),
                         replacementRange: NSRange(location: NSNotFound, length: NSNotFound)
                     )
                 case .connecting:
                     textClient.setMarkedText(
-                        "🎙️ [Typeless 連線語音辨識中...]",
+                        "\(modePrefix) 連線語音辨識中...",
                         selectionRange: NSRange(location: 0, length: 0),
                         replacementRange: NSRange(location: NSNotFound, length: NSNotFound)
                     )
                 case .listening(let partial):
-                    let display = partial.isEmpty ? "🎙️ [Typeless 聆聽中...] (說完按 Enter 送出，按 Esc 取消)" : "🎙️ 正在聆聽：\(partial)"
+                    let display = partial.isEmpty ? "\(modePrefix) 正在聆聽 (\(listeningHint)，Esc 取消)..." : "\(modePrefix) \(partial)"
                     textClient.setMarkedText(
                         display,
                         selectionRange: NSRange(location: display.utf16.count, length: 0),
@@ -1309,7 +1398,7 @@ class McBopomofoInputMethodController: IMKInputController {
                     )
                 case .polishing:
                     textClient.setMarkedText(
-                        "✨ [Typeless AI 思考潤飾中...]",
+                        polishingHint,
                         selectionRange: NSRange(location: 0, length: 0),
                         replacementRange: NSRange(location: NSNotFound, length: NSNotFound)
                     )

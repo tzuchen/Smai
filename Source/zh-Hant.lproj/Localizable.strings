@@ -273,6 +273,9 @@
 "LLM Prompt Optimization (>> prefix)" = "LLM 提示詞工程最佳化（>> 或句尾 。。）";
 "LLM Prompt Optimization (>> or ..)" = "LLM 提示詞工程最佳化（>> 或句尾 。。）";
 "Expand ideas into precise coding prompts with >> or trailing 。。 (supports mixed Chinese/English)." = "輸入「>>」或句尾「。。」自動重構為精準 Prompt，支援中英混打上文自動縫合。";
+"Typeless Voice Input (/v, /w, /tr, ⌥V)" = "Typeless 智慧語音輸入 (/v, /w, /tr, ⌥V)";
+"Push-to-Talk (Hold ⌥V to speak, release to send)" = "長按即說 Push-to-Talk (按住 ⌥V 說話，放開即送出)";
+"Audio Sound Feedback (Chimes on start/stop/cancel)" = "語音狀態提示音效 (開始/送出/取消發出系統提示音)";
 "Dual-Engine: Spark Qwen 27B + On-Device AFM Edge (~3B)" = "雙引擎協同：Spark Qwen 27B 主力加速 + 本機 AFM 邊緣備援";
 
 "Restart Smai" = "重啟思脈注音";

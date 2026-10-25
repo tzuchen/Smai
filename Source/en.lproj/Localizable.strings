@@ -275,5 +275,8 @@
 "LLM Prompt Optimization (>> prefix)" = "LLM Prompt Optimization (>> or ..)";
 "LLM Prompt Optimization (>> or ..)" = "LLM Prompt Optimization (>> or ..)";
 "Expand ideas into precise coding prompts with >> or trailing 。。 (supports mixed Chinese/English)." = "Expand ideas into precise coding prompts with >> or trailing 。。 (supports mixed Chinese/English).";
+"Typeless Voice Input (/v, /w, /tr, ⌥V)" = "Typeless Voice Input (/v, /w, /tr, ⌥V)";
+"Push-to-Talk (Hold ⌥V to speak, release to send)" = "Push-to-Talk (Hold ⌥V to speak, release to send)";
+"Audio Sound Feedback (Chimes on start/stop/cancel)" = "Audio Sound Feedback (Chimes on start/stop/cancel)";
 "Dual-Engine: Spark Qwen 27B + On-Device AFM Edge (~3B)" = "Dual-Engine: Spark Qwen 27B + On-Device AFM Edge (~3B)";
 

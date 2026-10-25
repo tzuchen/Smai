@@ -309,6 +309,30 @@ final class PreferencesViewModel: NSObject, ObservableObject {
         }
     }
 
+    var afmVoiceInputEnabled: Bool {
+        get { Preferences.afmVoiceInputEnabled }
+        set {
+            objectWillChange.send()
+            Preferences.afmVoiceInputEnabled = newValue
+        }
+    }
+
+    var afmVoicePushToTalkEnabled: Bool {
+        get { Preferences.afmVoicePushToTalkEnabled }
+        set {
+            objectWillChange.send()
+            Preferences.afmVoicePushToTalkEnabled = newValue
+        }
+    }
+
+    var afmVoiceFeedbackSoundEnabled: Bool {
+        get { Preferences.afmVoiceFeedbackSoundEnabled }
+        set {
+            objectWillChange.send()
+            Preferences.afmVoiceFeedbackSoundEnabled = newValue
+        }
+    }
+
     @Published private(set) var latestSystemReport = ""
 
     var effectiveUserPhraseLocation: String {

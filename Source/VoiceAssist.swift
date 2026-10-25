@@ -6,6 +6,56 @@ import AVFoundation
 import Foundation
 import InputMethodKit
 
+public enum VoiceMode: String, Sendable, CaseIterable {
+    case dictate = "dictate"         // 標準口述重構與書面潤飾
+    case helpMeWrite = "helpMeWrite" // 語音指令寫作（草稿、代碼、信件）
+    case translate = "translate"     // 語音多國語言翻譯
+}
+
+public struct VoiceSoundEffect {
+    public static func playStart() {
+        guard Preferences.afmVoiceFeedbackSoundEnabled else { return }
+        DispatchQueue.main.async {
+            NSSound(named: "Tink")?.play()
+        }
+    }
+
+    public static func playStop() {
+        guard Preferences.afmVoiceFeedbackSoundEnabled else { return }
+        DispatchQueue.main.async {
+            NSSound(named: "Pop")?.play()
+        }
+    }
+
+    public static func playCancel() {
+        guard Preferences.afmVoiceFeedbackSoundEnabled else { return }
+        DispatchQueue.main.async {
+            NSSound(named: "Funk")?.play()
+        }
+    }
+}
+
+public struct UserPhrasesDictionaryProvider {
+    public static func loadTopUserPhrases(limit: Int = 30) -> [String] {
+        let path = LanguageModelManager.userPhrasesDataPathMcBopomofo
+        guard FileManager.default.fileExists(atPath: path),
+              let content = try? String(contentsOfFile: path, encoding: .utf8) else {
+            return []
+        }
+        var phrases: [String] = []
+        for line in content.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else { continue }
+            let parts = trimmed.split(separator: " ")
+            if let first = parts.first, !first.isEmpty {
+                phrases.append(String(first))
+            }
+            if phrases.count >= limit { break }
+        }
+        return phrases
+    }
+}
+
 public enum VoiceInputState: Equatable {
     case idle
     case requestingPermission
@@ -31,6 +81,9 @@ public final class VoiceInputManager: NSObject, @unchecked Sendable {
     private var onCompletion: CompletionCallback?
 
     private(set) var currentState: VoiceInputState = .idle
+    private(set) var currentMode: VoiceMode = .dictate
+    private var targetAppBundleID: String?
+    private var targetAppName: String?
     private var accumulatedFinalText: String = ""
     private var latestPartialText: String = ""
     private var precedingContext: String = ""
@@ -71,6 +124,9 @@ public final class VoiceInputManager: NSObject, @unchecked Sendable {
     }
 
     public func start(
+        mode: VoiceMode = .dictate,
+        targetAppBundleID: String? = nil,
+        targetAppName: String? = nil,
         precedingContext: String = "",
         onStateChange: @escaping StateChangeCallback,
         completion: @escaping CompletionCallback
@@ -81,6 +137,9 @@ public final class VoiceInputManager: NSObject, @unchecked Sendable {
             AFMDevLogger.shared.log("VOICE-INPUT: Start called while already active (\(currentState))")
             return
         }
+        self.currentMode = mode
+        self.targetAppBundleID = targetAppBundleID
+        self.targetAppName = targetAppName
         self.precedingContext = precedingContext
         self.onStateChange = onStateChange
         self.onCompletion = completion
@@ -212,6 +271,8 @@ public final class VoiceInputManager: NSObject, @unchecked Sendable {
             engine.prepare()
             try engine.start()
             self.audioEngine = engine
+
+            VoiceSoundEffect.playStart()
 
             stateLock.lock()
             self.currentState = .listening(partialText: "")
@@ -375,6 +436,7 @@ public final class VoiceInputManager: NSObject, @unchecked Sendable {
         self.currentState = .polishing
         stateLock.unlock()
 
+        VoiceSoundEffect.playStop()
         AFMDevLogger.shared.log("VOICE-INPUT: User stopped recording. Sending {type: end}...")
 
         DispatchQueue.main.async { [weak self] in
@@ -395,8 +457,8 @@ public final class VoiceInputManager: NSObject, @unchecked Sendable {
             }
         }
 
-        // 3. Fallback timer: if server doesn't respond with 'done' within 2.0s, force finish
-        DispatchQueue.global().asyncAfter(deadline: .now() + 2.0) { [weak self] in
+        // 3. Fallback timer: if server doesn't respond with 'done' within 1.2s, force finish
+        DispatchQueue.global().asyncAfter(deadline: .now() + 1.2) { [weak self] in
             guard let self = self else { return }
             self.stateLock.lock()
             let stillPolishing = (self.currentState == .polishing)
@@ -419,6 +481,7 @@ public final class VoiceInputManager: NSObject, @unchecked Sendable {
         self.isStoppingStream = true
         stateLock.unlock()
 
+        VoiceSoundEffect.playCancel()
         AFMDevLogger.shared.log("VOICE-INPUT: Cancelled by user")
 
         audioEngine?.inputNode.removeTap(onBus: 0)
@@ -451,6 +514,10 @@ public final class VoiceInputManager: NSObject, @unchecked Sendable {
             rawTranscript = self.latestPartialText.trimmingCharacters(in: .whitespacesAndNewlines)
         }
         let context = self.precedingContext
+        let mode = self.currentMode
+        let bundleID = self.targetAppBundleID
+        let appName = self.targetAppName
+        let customPhrases = UserPhrasesDictionaryProvider.loadTopUserPhrases(limit: 25)
         stateLock.unlock()
 
         guard !rawTranscript.isEmpty else {
@@ -466,12 +533,16 @@ public final class VoiceInputManager: NSObject, @unchecked Sendable {
             return
         }
 
-        AFMDevLogger.shared.log("VOICE-INPUT: Polishing raw transcript with LLM: '\(rawTranscript)'")
+        AFMDevLogger.shared.log("VOICE-INPUT: Polishing raw transcript with LLM [mode=\(mode.rawValue), app=\(appName ?? "none")]: '\(rawTranscript)'")
 
         Task {
             let polished = await self.afmClient.typelessPolish(
                 rawTranscript: rawTranscript,
-                precedingContext: context
+                precedingContext: context,
+                mode: mode,
+                targetAppBundleID: bundleID,
+                targetAppName: appName,
+                customPhrases: customPhrases
             )
             let result = (polished?.isEmpty == false) ? polished! : rawTranscript
             AFMDevLogger.shared.log("VOICE-INPUT: Typeless final result: '\(result)'")
@@ -522,6 +593,9 @@ public final class VoiceInputManager: NSObject, @unchecked Sendable {
         self.accumulatedFinalText = ""
         self.latestPartialText = ""
         self.precedingContext = ""
+        self.currentMode = .dictate
+        self.targetAppBundleID = nil
+        self.targetAppName = nil
         self.isStoppingStream = false
     }
 }

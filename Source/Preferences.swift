@@ -83,6 +83,8 @@ private let kAFMClozeFillingEnabledKey = "AFMClozeFillingEnabled"
 private let kAFMPromptOptimizerEnabledKey = "AFMPromptOptimizerEnabled"
 private let kAFMVoiceInputEnabledKey = "AFMVoiceInputEnabled"
 private let kAFMVoiceASREndpointKey = "AFMVoiceASREndpoint"
+private let kAFMVoiceFeedbackSoundEnabledKey = "AFMVoiceFeedbackSoundEnabled"
+private let kAFMVoicePushToTalkEnabledKey = "AFMVoicePushToTalkEnabled"
 
 
 // Need to be populated to true by default upon first start, so the key is not private.
@@ -680,6 +682,12 @@ extension Preferences {
 
     @UserDefault(key: kAFMVoiceASREndpointKey, defaultValue: "")
     @objc static var afmVoiceASREndpoint: String
+
+    @UserDefault(key: kAFMVoiceFeedbackSoundEnabledKey, defaultValue: true)
+    @objc static var afmVoiceFeedbackSoundEnabled: Bool
+
+    @UserDefault(key: kAFMVoicePushToTalkEnabledKey, defaultValue: true)
+    @objc static var afmVoicePushToTalkEnabled: Bool
 }
 
 extension Preferences {

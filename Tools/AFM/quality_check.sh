@@ -6,11 +6,12 @@ set -eo pipefail
 # ==============================================================================
 # 涵蓋領域：
 # 1. 中英切換 (CapsLock 狀態機、防抖震、英文直通、Shift 大小寫判定)
-# 2. 首字斜線 (/v, /voice, /typeless, /resume, 刪除, Esc, 快速鍵直通, 非指令直通)
-# 3. 符號政策 (Option+符號快捷 ⌥/ ⌥- ⌥? ⌥. ⌥# ⌥> ⌥_, 全形標點鍵盤對映)
-# 4. 標點選字與長句防重複 (空白鍵動態選字、Enter 狀態機防雙重提交)
-# 5. 更新機制與核心詞庫 (GitHub Releases SemVer 比對、核心高頻詞庫完整性)
-# 6. 周邊 AI & ASR 服務連線檢測 (AFM Edge, Spark Qwen 27B, Topology API)
+# 2. 首字斜線 (/v, /voice, /typeless, /w, /write, /ask, /tr, /trans, /translate, /resume, 刪除, Esc, 快速鍵直通)
+# 3. 語音模式 (Option+V Push-to-Talk 長按判定、免持 Toggle、App-Aware 應用感知情境適配)
+# 4. 符號政策 (Option+符號快捷 ⌥/ ⌥- ⌥? ⌥. ⌥# ⌥> ⌥_, 全形標點鍵盤對映)
+# 5. 標點選字與長句防重複 (空白鍵動態選字、Enter 狀態機防雙重提交)
+# 6. 更新機制與核心詞庫 (GitHub Releases SemVer 比對、核心高頻詞庫完整性)
+# 7. 周邊 AI & ASR 服務連線檢測 (AFM Edge, Spark Qwen 27B, Topology API, Mac mini ASR)
 # ==============================================================================
 
 REPO_ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel 2>/dev/null || pwd)"
