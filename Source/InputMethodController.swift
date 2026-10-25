@@ -293,8 +293,8 @@ extension CandidateController {
 }
 
 struct SmaiVersion {
-    static let current = "1.3.0"
-    static let build = "20261024"
+    static let current = "1.4.0"
+    static let build = "20261026"
     static var displayString: String {
         return "v\(current) (Build \(build))"
     }
@@ -889,11 +889,6 @@ class McBopomofoInputMethodController: IMKInputController {
                         self.startVoiceInput(client: client, mode: .translate)
                         return true
                     }
-                    if let client = client as? IMKTextInput {
-                        self.commit(text: text, client: client)
-                    }
-                    AFMDevLogger.shared.log("SLASH COMMAND COMMITTED: '\(text)'")
-                    return true
                     if let client = client as? IMKTextInput {
                         self.commit(text: text, client: client)
                     }
