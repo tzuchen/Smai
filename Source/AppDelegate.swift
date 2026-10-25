@@ -275,12 +275,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NonModalAlertWindowControlle
                 switch apiResult {
                 case .shouldUpdate(let report):
                     self.updateNextStepURL = report.siteUrl
-                    let content = """
-                    發現思脈注音新版本 \(report.remoteShortVersion)！
-                    您目前使用的是 \(report.currentShortVersion) (Build \(report.currentVersion))。\(report.versionDescription)
-
-                    是否前往 GitHub 下載最新版本安裝包？
-                    """
+                    var contentParts: [String] = []
+                    contentParts.append("💡 發現新版本：\(report.remoteShortVersion)")
+                    contentParts.append("📌 目前版本：\(report.currentShortVersion) (Build \(report.currentVersion))")
+                    if !report.versionDescription.isEmpty {
+                        contentParts.append(report.versionDescription)
+                    }
+                    contentParts.append("\n點擊下方「前往下載」即可前往 GitHub 下載安裝套件。")
+                    let content = contentParts.joined(separator: "\n")
                     NonModalAlertWindowController.shared.show(
                         title: "發現思脈注音新版本",
                         content: content,

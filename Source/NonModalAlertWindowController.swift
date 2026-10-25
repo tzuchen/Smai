@@ -39,10 +39,18 @@ class NonModalAlertWindowController: NSWindowController {
     @IBOutlet weak var cancelButton: NSButton!
     weak var delegate: NonModalAlertWindowControllerDelegate?
 
+    private var contentScrollView: NSScrollView?
+    private var contentTextView: NSTextView?
+    private let baseWindowWidth: CGFloat = 420.0
+    private let baseWindowHeight: CGFloat = 130.0
+    private let expandedWindowWidth: CGFloat = 500.0
+
     @objc func show(
         title: String, content: String, confirmButtonTitle: String, cancelButtonTitle: String?,
         cancelAsDefault: Bool, delegate: NonModalAlertWindowControllerDelegate?
     ) {
+        _ = self.window
+
         if window?.isVisible == true {
             self.delegate?.nonModalAlertWindowControllerDidCancel(self)
         }
@@ -62,7 +70,7 @@ class NonModalAlertWindowController: NSWindowController {
             if cancelAsDefault {
                 window?.defaultButtonCell = cancelButton.cell as? NSButtonCell
             } else {
-                cancelButton.keyEquivalent = " "
+                cancelButton.keyEquivalent = "\u{1b}"
                 window?.defaultButtonCell = confirmButton.cell as? NSButtonCell
             }
         } else {
@@ -71,21 +79,87 @@ class NonModalAlertWindowController: NSWindowController {
 
         titleTextField.stringValue = title
 
-        let oldContentFrame = contentTextField.frame
-        contentTextField.stringValue = content
+        // Determine screen bounds to guarantee the window & buttons NEVER exceed the display
+        let targetScreen = window?.screen ?? NSScreen.main ?? NSScreen.screens.first
+        let visibleRect = targetScreen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let maxWindowHeight = min(visibleRect.height - 100.0, 520.0)
 
-        let infiniteHeightFrame = NSRect(
-            origin: CGPoint.zero, size: CGSize(width: oldContentFrame.width, height: 10240))
-        let newContentFrame = (content as NSString).boundingRect(
-            with: infiniteHeightFrame.size, options: [.usesLineFragmentOrigin],
-            attributes: [.font: contentTextField.font!])
-        let heightDelta = (newContentFrame.size.height - oldContentFrame.size.height)
+        let testFont = contentTextField?.font ?? NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+        let availableTextWidth = expandedWindowWidth - 102.0 - 20.0
+        let infiniteHeightFrame = NSRect(origin: .zero, size: CGSize(width: availableTextWidth, height: 10240))
+        let estimatedContentRect = (content as NSString).boundingRect(
+            with: infiniteHeightFrame.size,
+            options: [.usesLineFragmentOrigin],
+            attributes: [.font: testFont]
+        )
+        let contentHeight = ceil(estimatedContentRect.height)
+        let isLongContent = contentHeight > 140.0
 
-        var windowFrame = window?.frame ?? NSRect.zero
-        windowFrame.size.height += heightDelta
-        window?.level = NSWindow.Level(Int(CGShieldingWindowLevel()) + 1)
+        let windowWidth: CGFloat = isLongContent ? expandedWindowWidth : baseWindowWidth
+        let desiredHeight: CGFloat = isLongContent
+            ? min(max(340.0, baseWindowHeight + contentHeight), maxWindowHeight)
+            : min(baseWindowHeight + max(0, contentHeight - 14.0), maxWindowHeight)
+        let windowHeight: CGFloat = desiredHeight
+
+        // Strictly clamp origin inside visible screen bounds so buttons are ALWAYS accessible
+        var originX = visibleRect.midX - windowWidth / 2.0
+        var originY = visibleRect.midY - windowHeight / 2.0
+        originX = max(visibleRect.minX + 20.0, min(originX, visibleRect.maxX - windowWidth - 20.0))
+        originY = max(visibleRect.minY + 30.0, min(originY, visibleRect.maxY - windowHeight - 30.0))
+
+        let windowFrame = NSRect(x: originX, y: originY, width: windowWidth, height: windowHeight)
         window?.setFrame(windowFrame, display: true)
-        window?.center()
+        window?.isMovableByWindowBackground = true
+
+        if isLongContent, let contentView = window?.contentView {
+            contentTextField.isHidden = true
+
+            let scrollX: CGFloat = 102.0
+            let scrollBottom: CGFloat = 56.0
+            let scrollWidth: CGFloat = windowWidth - scrollX - 20.0
+            let scrollTop: CGFloat = titleTextField.frame.minY - 8.0
+            let scrollHeight: CGFloat = max(80.0, scrollTop - scrollBottom)
+            let scrollFrame = NSRect(x: scrollX, y: scrollBottom, width: scrollWidth, height: scrollHeight)
+
+            if contentScrollView == nil {
+                let scrollView = NSScrollView(frame: scrollFrame)
+                scrollView.hasVerticalScroller = true
+                scrollView.hasHorizontalScroller = false
+                scrollView.autohidesScrollers = true
+                scrollView.borderType = .bezelBorder
+
+                let textView = NSTextView(frame: NSRect(origin: .zero, size: scrollView.contentSize))
+                textView.minSize = NSSize(width: 0.0, height: scrollView.contentSize.height)
+                textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+                textView.isVerticallyResizable = true
+                textView.isHorizontallyResizable = false
+                textView.autoresizingMask = [.width]
+                textView.textContainer?.containerSize = NSSize(width: scrollView.contentSize.width, height: CGFloat.greatestFiniteMagnitude)
+                textView.textContainer?.widthTracksTextView = true
+                textView.isEditable = false
+                textView.isSelectable = true
+                textView.textContainerInset = NSSize(width: 6, height: 6)
+                textView.font = testFont
+
+                scrollView.documentView = textView
+                contentView.addSubview(scrollView)
+
+                self.contentScrollView = scrollView
+                self.contentTextView = textView
+            } else {
+                contentScrollView?.frame = scrollFrame
+                contentScrollView?.isHidden = false
+            }
+
+            contentTextView?.string = content
+            contentTextView?.scrollRangeToVisible(NSRange(location: 0, length: 0))
+        } else {
+            contentScrollView?.isHidden = true
+            contentTextField.isHidden = false
+            contentTextField.stringValue = content
+        }
+
+        window?.level = NSWindow.Level(Int(CGShieldingWindowLevel()) + 1)
         window?.makeKeyAndOrderFront(self)
         NSApp.activate(ignoringOtherApps: true)
     }
