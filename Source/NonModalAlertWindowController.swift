@@ -39,11 +39,23 @@ class NonModalAlertWindowController: NSWindowController {
     @IBOutlet weak var cancelButton: NSButton!
     weak var delegate: NonModalAlertWindowControllerDelegate?
 
+    var dismissOnConfirm: Bool = true
+
     private var contentScrollView: NSScrollView?
     private var contentTextView: NSTextView?
     private let baseWindowWidth: CGFloat = 420.0
     private let baseWindowHeight: CGFloat = 130.0
     private let expandedWindowWidth: CGFloat = 500.0
+
+    func setWorkingStatus(title: String, message: String) {
+        titleTextField.stringValue = title
+        contentTextField.stringValue = message
+        contentTextField.isHidden = false
+        contentScrollView?.isHidden = true
+        confirmButton.isEnabled = false
+        confirmButton.title = "處理中..."
+        cancelButton.isEnabled = false
+    }
 
     @objc func show(
         title: String, content: String, confirmButtonTitle: String, cancelButtonTitle: String?,
@@ -56,10 +68,12 @@ class NonModalAlertWindowController: NSWindowController {
         }
 
         self.delegate = delegate
+        confirmButton.isEnabled = true
         confirmButton.title = confirmButtonTitle
         if let cancelButtonTitle = cancelButtonTitle {
             cancelButton.title = cancelButtonTitle
             cancelButton.isHidden = false
+            cancelButton.isEnabled = true
         } else {
             cancelButton.isHidden = true
         }
@@ -166,7 +180,9 @@ class NonModalAlertWindowController: NSWindowController {
 
     @IBAction func confirmButtonAction(_ sender: Any) {
         delegate?.nonModalAlertWindowControllerDidConfirm(self)
-        window?.orderOut(self)
+        if dismissOnConfirm {
+            window?.orderOut(self)
+        }
     }
 
     @IBAction func cancelButtonAction(_ sender: Any) {

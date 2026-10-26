@@ -34,6 +34,9 @@ private let kTimeoutInterval: TimeInterval = 60.0
 
 struct VersionUpdateReport {
     var siteUrl: URL?
+    var packageDownloadUrl: URL?
+    var packageName: String = ""
+    var packageSize: Int = 0
     var currentShortVersion: String = ""
     var currentVersion: String = ""
     var remoteShortVersion: String = ""
@@ -149,7 +152,27 @@ struct VersionUpdateApi {
                 return
             }
 
+            var packageDownloadUrl: URL? = nil
+            var packageName: String = ""
+            var packageSize: Int = 0
+            if let assets = json["assets"] as? [[String: Any]] {
+                for asset in assets {
+                    if let name = asset["name"] as? String,
+                       name.hasSuffix(".pkg"),
+                       let urlStr = asset["browser_download_url"] as? String,
+                       let url = URL(string: urlStr) {
+                        packageDownloadUrl = url
+                        packageName = name
+                        packageSize = asset["size"] as? Int ?? 0
+                        break
+                    }
+                }
+            }
+
             var report = VersionUpdateReport(siteUrl: siteUrl)
+            report.packageDownloadUrl = packageDownloadUrl
+            report.packageName = packageName
+            report.packageSize = packageSize
             report.currentShortVersion = currentShortVersion
             report.currentVersion = SmaiVersion.build
             report.remoteShortVersion = remoteShortVersion
@@ -172,6 +195,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NonModalAlertWindowControlle
     private var preferencesWindowController: PreferencesWindowController?
     private var checkTask: URLSessionTask?
     private var updateNextStepURL: URL?
+    private var latestReport: VersionUpdateReport?
+    private var updateDownloadTask: URLSessionDownloadTask?
     private var fsStreamHelper: FSEventStreamHelper?
     private var serviceProvider = ServiceProvider()
     private var serviceProviderHelper = ServiceProviderInputHelper()
@@ -275,21 +300,28 @@ class AppDelegate: NSObject, NSApplicationDelegate, NonModalAlertWindowControlle
                 switch apiResult {
                 case .shouldUpdate(let report):
                     self.updateNextStepURL = report.siteUrl
+                    self.latestReport = report
                     var contentParts: [String] = []
                     contentParts.append("💡 發現新版本：\(report.remoteShortVersion)")
                     contentParts.append("📌 目前版本：\(report.currentShortVersion) (Build \(report.currentVersion))")
                     if !report.versionDescription.isEmpty {
                         contentParts.append(report.versionDescription)
                     }
-                    contentParts.append("\n點擊下方「前往下載」即可前往 GitHub 下載安裝套件。")
+                    if report.packageDownloadUrl != nil {
+                        contentParts.append("\n👉 點擊下方「一鍵自動更新」，系統將自動下載並完成就地安裝（需輸入密碼或 Touch ID 授權）。")
+                    } else {
+                        contentParts.append("\n點擊下方「前往下載」即可前往 GitHub 下載安裝套件。")
+                    }
                     let content = contentParts.joined(separator: "\n")
+                    NonModalAlertWindowController.shared.dismissOnConfirm = (report.packageDownloadUrl == nil)
                     NonModalAlertWindowController.shared.show(
                         title: "發現思脈注音新版本",
                         content: content,
-                        confirmButtonTitle: "前往下載",
+                        confirmButtonTitle: report.packageDownloadUrl != nil ? "一鍵自動更新" : "前往下載",
                         cancelButtonTitle: "稍後再說",
                         cancelAsDefault: false, delegate: self)
                 case .noNeedToUpdate:
+                    NonModalAlertWindowController.shared.dismissOnConfirm = true
                     NonModalAlertWindowController.shared.show(
                         title: "版本檢查完成",
                         content: "思脈注音已是最新版本 (\(SmaiVersion.displayString))。",
@@ -304,6 +336,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NonModalAlertWindowControlle
                     let title = "檢查新版失敗"
                     let content = "無法連接至伺服器或網路連線中斷。\n\n錯誤訊息：\(message)"
                     let buttonTitle = "關閉"
+                    NonModalAlertWindowController.shared.dismissOnConfirm = true
                     NonModalAlertWindowController.shared.show(
                         title: title, content: content, confirmButtonTitle: buttonTitle,
                         cancelButtonTitle: nil, cancelAsDefault: false, delegate: nil)
@@ -315,13 +348,141 @@ class AppDelegate: NSObject, NSApplicationDelegate, NonModalAlertWindowControlle
     }
 
     func nonModalAlertWindowControllerDidConfirm(_ controller: NonModalAlertWindowController) {
-        if let updateNextStepURL = updateNextStepURL {
-            NSWorkspace.shared.open(updateNextStepURL)
+        guard let report = latestReport, let pkgUrl = report.packageDownloadUrl else {
+            if let updateNextStepURL = updateNextStepURL {
+                NSWorkspace.shared.open(updateNextStepURL)
+            }
+            updateNextStepURL = nil
+            latestReport = nil
+            controller.window?.orderOut(self)
+            return
         }
-        updateNextStepURL = nil
+
+        AFMDevLogger.shared.log("AUTO UPDATE: starting download from \(pkgUrl)")
+        controller.setWorkingStatus(
+            title: "正在下載思脈注音 \(report.remoteShortVersion)...",
+            message: "正在自 GitHub 下載最新安裝套件 (\(report.packageName.isEmpty ? "Smai.pkg" : report.packageName))...\n\n下載完成後系統將呼叫安裝器，請於彈出視窗以 Touch ID 或密碼授權完成就地更新。"
+        )
+
+        let session = URLSession(configuration: .default)
+        let downloadTask = session.downloadTask(with: pkgUrl) { [weak self] tempLocalUrl, response, error in
+            guard let self = self else { return }
+
+            if let error = error {
+                AFMDevLogger.shared.log("AUTO UPDATE: download failed: \(error.localizedDescription)")
+                DispatchQueue.main.async {
+                    controller.dismissOnConfirm = true
+                    controller.show(
+                        title: "下載更新失敗",
+                        content: "無法下載安裝套件：\(error.localizedDescription)\n\n是否改由瀏覽器開啟 GitHub 網頁手動下載？",
+                        confirmButtonTitle: "開啟網頁",
+                        cancelButtonTitle: "關閉",
+                        cancelAsDefault: false,
+                        delegate: self
+                    )
+                    self.latestReport = nil
+                }
+                return
+            }
+
+            guard let tempLocalUrl = tempLocalUrl else {
+                DispatchQueue.main.async {
+                    controller.dismissOnConfirm = true
+                    controller.show(
+                        title: "下載更新失敗",
+                        content: "下載之檔案為空或無效。\n\n是否改由瀏覽器開啟 GitHub 網頁手動下載？",
+                        confirmButtonTitle: "開啟網頁",
+                        cancelButtonTitle: "關閉",
+                        cancelAsDefault: false,
+                        delegate: self
+                    )
+                    self.latestReport = nil
+                }
+                return
+            }
+
+            let tempTargetDir = NSTemporaryDirectory()
+            let finalPkgPath = (tempTargetDir as NSString).appendingPathComponent("Smai-AutoUpdate.pkg")
+            try? FileManager.default.removeItem(atPath: finalPkgPath)
+            do {
+                try FileManager.default.moveItem(at: tempLocalUrl, to: URL(fileURLWithPath: finalPkgPath))
+            } catch {
+                AFMDevLogger.shared.log("AUTO UPDATE: move file failed: \(error.localizedDescription)")
+                DispatchQueue.main.async {
+                    controller.dismissOnConfirm = true
+                    controller.show(
+                        title: "安裝套件存檔失敗",
+                        content: "無法儲存下載的套件檔案：\(error.localizedDescription)",
+                        confirmButtonTitle: "前往 GitHub",
+                        cancelButtonTitle: "關閉",
+                        cancelAsDefault: false,
+                        delegate: self
+                    )
+                    self.latestReport = nil
+                }
+                return
+            }
+
+            DispatchQueue.main.async {
+                controller.setWorkingStatus(
+                    title: "正在安裝思脈注音 \(report.remoteShortVersion)...",
+                    message: "套件已成功下載。\n請在系統即將彈出的認證視窗中，使用 Touch ID 或密碼確認授權。\n\n安裝完成後輸入法將自動重新啟動生效。"
+                )
+            }
+
+            // 3. Execute installer with administrator privileges in background
+            DispatchQueue.global(qos: .userInitiated).async {
+                let scriptSource = """
+                do shell script "/usr/sbin/installer -pkg '\(finalPkgPath)' -target /" with administrator privileges
+                """
+                var errorDict: NSDictionary?
+                let appleScript = NSAppleScript(source: scriptSource)
+                let output = appleScript?.executeAndReturnError(&errorDict)
+                AFMDevLogger.shared.log("AUTO UPDATE: installer script executed, result=\(output?.stringValue ?? "nil"), error=\(String(describing: errorDict))")
+
+                DispatchQueue.main.async {
+                    if let errorDict = errorDict {
+                        let errNum = errorDict[NSAppleScript.errorNumber] as? Int ?? 0
+                        let errMsg = errorDict[NSAppleScript.errorMessage] as? String ?? "未知錯誤"
+                        controller.dismissOnConfirm = true
+                        if errNum == -128 {
+                            // User cancelled authorization
+                            controller.show(
+                                title: "安裝授權已取消",
+                                content: "您取消了 Touch ID 或密碼授權。\n思脈注音尚未安裝新版，隨時可再次檢查更新。",
+                                confirmButtonTitle: "前往 GitHub",
+                                cancelButtonTitle: "關閉",
+                                cancelAsDefault: false,
+                                delegate: self
+                            )
+                        } else {
+                            controller.show(
+                                title: "自動安裝失敗",
+                                content: "安裝器執行失敗 (\(errNum))：\(errMsg)\n\n建議前往 GitHub 下載安裝套件手動安裝。",
+                                confirmButtonTitle: "前往 GitHub",
+                                cancelButtonTitle: "關閉",
+                                cancelAsDefault: false,
+                                delegate: self
+                            )
+                        }
+                        self.latestReport = nil
+                    } else {
+                        // Success! Postinstall script terminates old instance and relaunches new instance.
+                        controller.window?.orderOut(self)
+                        self.latestReport = nil
+                        self.updateNextStepURL = nil
+                    }
+                }
+            }
+        }
+        self.updateDownloadTask = downloadTask
+        downloadTask.resume()
     }
 
     func nonModalAlertWindowControllerDidCancel(_ controller: NonModalAlertWindowController) {
+        updateDownloadTask?.cancel()
+        updateDownloadTask = nil
+        latestReport = nil
         updateNextStepURL = nil
     }
 }

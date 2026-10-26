@@ -50,6 +50,7 @@ echo "=================================================="
 # 1. 檢查二進位檔是否存在，或是否要求強制編譯
 if [ "$FORCE_BUILD" = true ] || [ ! -f "$BINARY" ]; then
     echo "🔨 [1/3] 正在執行增量編譯 (xcodebuild)..."
+    rm -rf "$DERIVED_DATA_PATH/Build/Intermediates.noindex/PrecompiledHeaders" 2>/dev/null || true
     xcodebuild -project McBopomofo.xcodeproj \
                -scheme McBopomofo \
                -configuration Debug \
