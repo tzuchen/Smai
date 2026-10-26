@@ -293,7 +293,7 @@ extension CandidateController {
 }
 
 struct SmaiVersion {
-    static let current = "1.4.0"
+    static let current = "1.4.1"
     static let build = "20261026"
     static var displayString: String {
         return "v\(current) (Build \(build))"

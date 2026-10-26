@@ -1173,12 +1173,12 @@ if CommandLine.arguments.count > 1 {
         check("送出機制：長句 Enter 送出狀態機 (防重複 Committing 漏洞)", passed: enterNoDupeOk)
 
         // --- 6. 語意版本比對演算法 (SemVer) ---
-        let v1 = VersionUpdateApi.isRemoteVersionNewer(current: "1.3.0", remote: "1.4.0") == true
-        let v2 = VersionUpdateApi.isRemoteVersionNewer(current: "1.4.0", remote: "1.4.0") == false
-        let v3 = VersionUpdateApi.isRemoteVersionNewer(current: "1.4.0", remote: "1.3.0") == false
-        let v4 = VersionUpdateApi.isRemoteVersionNewer(current: "1.4.0", remote: "v1.4.1") == true
-        let v5 = VersionUpdateApi.isRemoteVersionNewer(current: "1.4.0", remote: "2.0.0") == true
-        let v6 = VersionUpdateApi.isRemoteVersionNewer(current: "1.4.0", remote: "1.4.0.1") == true
+        let v1 = VersionUpdateApi.isRemoteVersionNewer(current: "1.4.0", remote: "1.4.1") == true
+        let v2 = VersionUpdateApi.isRemoteVersionNewer(current: "1.4.1", remote: "1.4.1") == false
+        let v3 = VersionUpdateApi.isRemoteVersionNewer(current: "1.4.1", remote: "1.4.0") == false
+        let v4 = VersionUpdateApi.isRemoteVersionNewer(current: "1.4.1", remote: "v1.4.2") == true
+        let v5 = VersionUpdateApi.isRemoteVersionNewer(current: "1.4.1", remote: "2.0.0") == true
+        let v6 = VersionUpdateApi.isRemoteVersionNewer(current: "1.4.1", remote: "1.4.1.1") == true
         let semVerOk = v1 && v2 && v3 && v4 && v5 && v6
         check("更新機制：GitHub Releases 語意版本號比對 (SemVer 嚴格檢查)", passed: semVerOk)
 
