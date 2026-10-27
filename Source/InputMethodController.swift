@@ -293,8 +293,8 @@ extension CandidateController {
 }
 
 struct SmaiVersion {
-    static let current = "1.4.1"
-    static let build = "20261026"
+    static let current = "1.4.2"
+    static let build = "20261028"
     static var displayString: String {
         return "v\(current) (Build \(build))"
     }
@@ -344,6 +344,7 @@ class McBopomofoInputMethodController: IMKInputController {
         }
         voiceStartedByHold = false
         voiceKeyDownTimestamp = nil
+        AFMDevLogger.shared.log("VOICE-INPUT: Quick tap (<0.35s), switching to toggle hands-free recording mode")
         return false
     }
 
@@ -766,24 +767,6 @@ class McBopomofoInputMethodController: IMKInputController {
                 return false
             }
 
-            let isVKey = (event.keyCode == UInt16(kVK_ANSI_V))
-            if isVKey && checkPushToTalkRelease() {
-                return true
-            }
-
-            if state is InputState.Empty {
-                return false
-            }
-            // Handle key up events during active input state.
-            //
-            // This prevents double-space from affecting the current input.
-            // While macOS may normally insert a period on double space, this
-            // should be suppressed when there is an active composing buffer or
-            // candidate window.
-            return true
-        }
-
-        if event.type == .flagsChanged {
             if !event.modifierFlags.contains(.option) {
                 if checkPushToTalkRelease() {
                     return true
@@ -810,6 +793,28 @@ class McBopomofoInputMethodController: IMKInputController {
             return false
         }
 
+        if event.type == .keyUp {
+            let isVKey = (event.keyCode == UInt16(kVK_ANSI_V))
+            if isVKey && checkPushToTalkRelease() {
+                return true
+            }
+
+            if VoiceInputManager.shared.isRecordingOrProcessing {
+                return true
+            }
+
+            if state is InputState.Empty {
+                return false
+            }
+            // Handle key up events during active input state.
+            //
+            // This prevents double-space from affecting the current input.
+            // While macOS may normally insert a period on double space, this
+            // should be suppressed when there is an active composing buffer or
+            // candidate window.
+            return true
+        }
+
         if event.type == .keyDown {
             let chars = event.characters ?? ""
             let charsNoMod = event.charactersIgnoringModifiers ?? ""
@@ -833,16 +838,16 @@ class McBopomofoInputMethodController: IMKInputController {
 
             // 0. If Typeless Voice Input is active, intercept keystrokes
             if VoiceInputManager.shared.isRecordingOrProcessing {
+                if event.isARepeat {
+                    // Silently ignore all key repeat events while recording
+                    return true
+                }
+
                 let isReturn = (event.keyCode == UInt16(kVK_Return))
                 let isEscape = (event.keyCode == UInt16(kVK_Escape))
                 let isOptV = (event.keyCode == UInt16(kVK_ANSI_V)) && hasOpt && !hasCmd && !hasCtrl
 
-                if isReturn || isOptV {
-                    voiceStartedByHold = false
-                    voiceKeyDownTimestamp = nil
-                    VoiceInputManager.shared.stopAndPolish()
-                    return true
-                } else if isEscape {
+                if isEscape {
                     voiceStartedByHold = false
                     voiceKeyDownTimestamp = nil
                     VoiceInputManager.shared.cancel()
@@ -851,6 +856,20 @@ class McBopomofoInputMethodController: IMKInputController {
                         selectionRange: NSRange(location: 0, length: 0),
                         replacementRange: NSRange(location: NSNotFound, length: NSNotFound)
                     )
+                    return true
+                } else if isReturn {
+                    voiceStartedByHold = false
+                    voiceKeyDownTimestamp = nil
+                    VoiceInputManager.shared.stopAndPolish()
+                    return true
+                } else if isOptV {
+                    if !voiceStartedByHold {
+                        // In Toggle mode: pressing Opt+V again stops recording
+                        voiceStartedByHold = false
+                        voiceKeyDownTimestamp = nil
+                        VoiceInputManager.shared.stopAndPolish()
+                    }
+                    // In Push-to-Talk Hold mode: wait for keyUp or Option modifier release
                     return true
                 }
                 return true

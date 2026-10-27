@@ -94,3 +94,26 @@
 }
 
 @end
+
+@implementation ObjCExceptionCatcher
++ (BOOL)tryBlock:(NS_NOESCAPE void(^)(void))block error:(NSError * _Nullable * _Nullable)error
+{
+    @try {
+        block();
+        return YES;
+    } @catch (NSException *exception) {
+        if (error) {
+            NSString *reason = exception.reason != nil ? exception.reason : @"Objective-C exception thrown";
+            NSString *name = exception.name != nil ? exception.name : @"NSException";
+            *error = [NSError errorWithDomain:@"ObjCExceptionCatcher"
+                                         code:-1
+                                     userInfo:@{
+                NSLocalizedDescriptionKey: reason,
+                @"ExceptionName": name
+            }];
+        }
+        return NO;
+    }
+}
+@end
+

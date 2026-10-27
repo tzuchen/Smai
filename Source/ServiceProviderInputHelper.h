@@ -29,4 +29,8 @@ NS_ASSUME_NONNULL_BEGIN
 
 @end
 
+@interface ObjCExceptionCatcher : NSObject
++ (BOOL)tryBlock:(NS_NOESCAPE void(^)(void))block error:(NSError * _Nullable * _Nullable)error NS_SWIFT_NAME(execute(_:));
+@end
+
 NS_ASSUME_NONNULL_END

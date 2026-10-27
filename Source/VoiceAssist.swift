@@ -146,6 +146,14 @@ public final class VoiceInputManager: NSObject, @unchecked Sendable {
         self.accumulatedFinalText = ""
         self.latestPartialText = ""
         self.isStoppingStream = false
+
+        guard AVCaptureDevice.default(for: .audio) != nil else {
+            stateLock.unlock()
+            AFMDevLogger.shared.log("VOICE-INPUT: No audio capture device found on this system")
+            handleFailure("找不到麥克風輸入裝置。若使用 Mac mini 請先接上麥克風或連線 AirPods。")
+            return
+        }
+
         self.currentState = .requestingPermission
         stateLock.unlock()
 
@@ -177,6 +185,11 @@ public final class VoiceInputManager: NSObject, @unchecked Sendable {
 
     private func initiateConnectionAndRecording() {
         stateLock.lock()
+        guard !self.isStoppingStream && (self.currentState == .requestingPermission || self.currentState == .idle) else {
+            stateLock.unlock()
+            AFMDevLogger.shared.log("VOICE-INPUT: Aborting connection because state is \(currentState) or stopping=\(isStoppingStream)")
+            return
+        }
         self.currentState = .connecting
         stateLock.unlock()
 
@@ -190,6 +203,13 @@ public final class VoiceInputManager: NSObject, @unchecked Sendable {
     }
 
     private func connectToASR(endpoints: [String], index: Int) {
+        stateLock.lock()
+        guard !self.isStoppingStream && self.currentState == .connecting else {
+            stateLock.unlock()
+            return
+        }
+        stateLock.unlock()
+
         guard index < endpoints.count else {
             handleFailure("無法連接本地 ASR 語音伺服器 (ws://127.0.0.1:8765 或 wss://mac-mini.tail670ea6.ts.net)")
             return
@@ -214,6 +234,18 @@ public final class VoiceInputManager: NSObject, @unchecked Sendable {
         webSocketTask?.receive { [weak self] result in
             guard let self = self else { return }
 
+            self.stateLock.lock()
+            let stopping = self.isStoppingStream
+            let state = self.currentState
+            self.stateLock.unlock()
+
+            if stopping || state == .idle {
+                AFMDevLogger.shared.log("VOICE-INPUT: Received ASR response but stream is already stopping or idle, closing")
+                self.webSocketTask?.cancel()
+                self.webSocketTask = nil
+                return
+            }
+
             switch result {
             case .success(let message):
                 let text: String
@@ -228,8 +260,16 @@ public final class VoiceInputManager: NSObject, @unchecked Sendable {
 
                 if text.contains("\"ready\"") {
                     AFMDevLogger.shared.log("VOICE-INPUT: ASR READY received from [\(endpoints[index])]")
-                    self.startAudioEngine()
-                    self.startContinuousReceiveLoop()
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self = self else { return }
+                        self.stateLock.lock()
+                        let isCancelled = self.isStoppingStream || self.currentState != .connecting
+                        self.stateLock.unlock()
+                        if isCancelled { return }
+
+                        self.startAudioEngine()
+                        self.startContinuousReceiveLoop()
+                    }
                 } else {
                     self.handleASRServerMessage(text)
                     self.startContinuousReceiveLoop()
@@ -248,10 +288,13 @@ public final class VoiceInputManager: NSObject, @unchecked Sendable {
         do {
             let engine = AVAudioEngine()
             let inputNode = engine.inputNode
+
+            inputNode.removeTap(onBus: 0)
+
             let inputFormat = inputNode.outputFormat(forBus: 0)
 
             guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
-                throw NSError(domain: "VoiceInputManager", code: -1, userInfo: [NSLocalizedDescriptionKey: "無效的麥克風輸入格式"])
+                throw NSError(domain: "VoiceInputManager", code: -1, userInfo: [NSLocalizedDescriptionKey: "無效的麥克風輸入格式（未檢測到有效音訊輸入裝置）"])
             }
 
             guard let targetFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16000, channels: 1, interleaved: true) else {
@@ -264,8 +307,14 @@ public final class VoiceInputManager: NSObject, @unchecked Sendable {
             self.converter = converter
 
             let bufferSize: AVAudioFrameCount = 1024
-            inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: inputFormat) { [weak self] (buffer, time) in
-                self?.convertAndSendAudio(buffer: buffer)
+            do {
+                try ObjCExceptionCatcher.execute {
+                    inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: inputFormat) { [weak self] (buffer, time) in
+                        self?.convertAndSendAudio(buffer: buffer)
+                    }
+                }
+            } catch {
+                throw NSError(domain: "VoiceInputManager", code: -4, userInfo: [NSLocalizedDescriptionKey: "無法監聽麥克風音訊輸入: \(error.localizedDescription)"])
             }
 
             engine.prepare()
@@ -432,6 +481,7 @@ public final class VoiceInputManager: NSObject, @unchecked Sendable {
             stateLock.unlock()
             return
         }
+        let previousState = self.currentState
         self.isStoppingStream = true
         self.currentState = .polishing
         stateLock.unlock()
@@ -448,6 +498,14 @@ public final class VoiceInputManager: NSObject, @unchecked Sendable {
         audioEngine?.stop()
         audioEngine = nil
         converter = nil
+
+        // If user stopped while still requesting permission or connecting (no audio was captured),
+        // finish immediately without waiting for ASR done timeout
+        if previousState == .requestingPermission || previousState == .connecting {
+            AFMDevLogger.shared.log("VOICE-INPUT: Stopped while still in \(previousState); ending immediately")
+            self.finishAndRunLLMPolish()
+            return
+        }
 
         // 2. Send end message to ASR
         let endMsg = URLSessionWebSocketTask.Message.string("{\"type\":\"end\"}")

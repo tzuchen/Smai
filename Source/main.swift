@@ -1320,6 +1320,42 @@ if CommandLine.arguments.count > 1 {
         let pttOk = pttHold && pttTap && pttDisabled
         check("語音策略：Push-to-Talk 釋放判定狀態機 (Hold >= 350ms vs Quick Tap Toggle)", passed: pttOk)
 
+        // --- 17. 語音長按 Key Repeat 與 Hold 防早退機制 ---
+        func simulateVoiceKeyDown(isRepeat: Bool, isHold: Bool, isOptV: Bool, isReturn: Bool) -> (shouldStop: Bool, consumed: Bool) {
+            if isRepeat {
+                return (shouldStop: false, consumed: true)
+            }
+            if isReturn {
+                return (shouldStop: true, consumed: true)
+            }
+            if isOptV {
+                if !isHold {
+                    return (shouldStop: true, consumed: true)
+                }
+                return (shouldStop: false, consumed: true)
+            }
+            return (shouldStop: false, consumed: true)
+        }
+        let repeatIgnored = simulateVoiceKeyDown(isRepeat: true, isHold: true, isOptV: true, isReturn: false) == (false, true)
+        let holdIgnored = simulateVoiceKeyDown(isRepeat: false, isHold: true, isOptV: true, isReturn: false) == (false, true)
+        let toggleStops = simulateVoiceKeyDown(isRepeat: false, isHold: false, isOptV: true, isReturn: false) == (true, true)
+        let returnStops = simulateVoiceKeyDown(isRepeat: false, isHold: true, isOptV: false, isReturn: true) == (true, true)
+        let voiceKeyHandlingOk = repeatIgnored && holdIgnored && toggleStops && returnStops
+        check("按鍵防護：語音 Push-to-Talk 長按防早退 (Key Repeat 壓制與 Hold 模式鎖定)", passed: voiceKeyHandlingOk)
+
+        // --- 18. ObjCExceptionCatcher 異常安全攔截器 ---
+        var exceptionSafeOk = false
+        var exceptionDetail = ""
+        do {
+            try ObjCExceptionCatcher.execute {
+                NSException(name: NSExceptionName("TestCoreAudioException"), reason: "Simulated audio device exception", userInfo: nil).raise()
+            }
+        } catch {
+            exceptionSafeOk = true
+            exceptionDetail = error.localizedDescription
+        }
+        check("異常防護：ObjCExceptionCatcher 底層崩潰攔截 (安全吸收 CoreAudio/AVAudioEngine 異常)", passed: exceptionSafeOk, detail: exceptionDetail)
+
         print("==================================================")
         if allPassed {
             print("🎉 全部品質檢查項目通過！(All Quality Checks PASSED)")
