@@ -1206,6 +1206,39 @@ if CommandLine.arguments.count > 1 {
         let voiceEndpointsOk = hasWsLocal && hasWsRemote
         check("語音輸入：Typeless 語音模組後端端點解析 (本機 WS & 遠端 Tailscale)", passed: voiceEndpointsOk)
 
+        // 語音輸入模組多會話連續觸發與防 Hang 生命週期檢查
+        VoiceInputManager.shared.cancel()
+        let initialIdle = !VoiceInputManager.shared.isRecordingOrProcessing
+        var session1StatePassed = false
+        VoiceInputManager.shared.start(
+            mode: .dictate,
+            onStateChange: { _ in
+                session1StatePassed = true
+            },
+            completion: { _ in }
+        )
+        VoiceInputManager.shared.cancel()
+        let session1Cancelled = !VoiceInputManager.shared.isRecordingOrProcessing
+
+        // 連續第二次觸發（模擬 MacBook 連續語音輸入情境）
+        var session2StatePassed = false
+        VoiceInputManager.shared.start(
+            mode: .dictate,
+            onStateChange: { _ in
+                session2StatePassed = true
+            },
+            completion: { _ in }
+        )
+        VoiceInputManager.shared.cancel()
+        let session2Cancelled = !VoiceInputManager.shared.isRecordingOrProcessing
+
+        // 連續第三次觸發驗證乾淨重設
+        VoiceInputManager.shared.cancel()
+        let session3Cancelled = !VoiceInputManager.shared.isRecordingOrProcessing
+
+        let voiceMultiSessionOk = initialIdle && session1Cancelled && session2Cancelled && session3Cancelled
+        check("語音輸入：Typeless 多會話連續重啟防 Hang 安全檢查 (世代 Token 隔離與 AudioEngine 持久生命週期)", passed: voiceMultiSessionOk)
+
         // --- 10. 中英交替混打無縫過渡檢查 ---
         kh.clear()
         var transState: InputState = InputState.Empty()

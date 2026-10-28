@@ -293,7 +293,7 @@ extension CandidateController {
 }
 
 struct SmaiVersion {
-    static let current = "1.4.2"
+    static let current = "1.4.3"
     static let build = "20261028"
     static var displayString: String {
         return "v\(current) (Build \(build))"
@@ -331,7 +331,11 @@ class McBopomofoInputMethodController: IMKInputController {
     private var activeVoiceMode: VoiceMode = .dictate
 
     private func checkPushToTalkRelease() -> Bool {
-        guard VoiceInputManager.shared.isRecordingOrProcessing, voiceStartedByHold else { return false }
+        guard VoiceInputManager.shared.isRecordingOrProcessing, voiceStartedByHold else {
+            voiceStartedByHold = false
+            voiceKeyDownTimestamp = nil
+            return false
+        }
         if let downTime = voiceKeyDownTimestamp {
             let elapsed = Date().timeIntervalSince(downTime)
             if Preferences.afmVoicePushToTalkEnabled && elapsed >= 0.35 {
@@ -863,13 +867,18 @@ class McBopomofoInputMethodController: IMKInputController {
                     VoiceInputManager.shared.stopAndPolish()
                     return true
                 } else if isOptV {
-                    if !voiceStartedByHold {
-                        // In Toggle mode: pressing Opt+V again stops recording
-                        voiceStartedByHold = false
-                        voiceKeyDownTimestamp = nil
+                    voiceStartedByHold = false
+                    voiceKeyDownTimestamp = nil
+                    if case .polishing = VoiceInputManager.shared.currentState {
+                        VoiceInputManager.shared.cancel()
+                        (client as? IMKTextInput)?.setMarkedText(
+                            "",
+                            selectionRange: NSRange(location: 0, length: 0),
+                            replacementRange: NSRange(location: NSNotFound, length: NSNotFound)
+                        )
+                    } else {
                         VoiceInputManager.shared.stopAndPolish()
                     }
-                    // In Push-to-Talk Hold mode: wait for keyUp or Option modifier release
                     return true
                 }
                 return true
@@ -1417,8 +1426,11 @@ class McBopomofoInputMethodController: IMKInputController {
                         replacementRange: NSRange(location: NSNotFound, length: NSNotFound)
                     )
                 case .finished:
-                    break
+                    self.voiceStartedByHold = false
+                    self.voiceKeyDownTimestamp = nil
                 case .error(let msg):
+                    self.voiceStartedByHold = false
+                    self.voiceKeyDownTimestamp = nil
                     textClient.setMarkedText(
                         "⚠️ \(msg)",
                         selectionRange: NSRange(location: 0, length: 0),
@@ -1432,11 +1444,14 @@ class McBopomofoInputMethodController: IMKInputController {
                         )
                     }
                 case .idle:
-                    break
+                    self.voiceStartedByHold = false
+                    self.voiceKeyDownTimestamp = nil
                 }
             },
             completion: { [weak self] result in
                 guard let self = self else { return }
+                self.voiceStartedByHold = false
+                self.voiceKeyDownTimestamp = nil
                 if let text = result, !text.isEmpty {
                     textClient.setMarkedText(
                         "",
