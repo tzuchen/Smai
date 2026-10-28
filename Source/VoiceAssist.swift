@@ -181,19 +181,19 @@ public final class VoiceInputManager: NSObject, @unchecked Sendable {
         self.currentState = .requestingPermission
         stateLock.unlock()
 
-        // 25s session watchdog
+        // 300s (5-minute) overall session watchdog
         let watchdog = DispatchWorkItem { [weak self] in
             guard let self = self else { return }
             self.stateLock.lock()
             let stillActive = (self.currentSessionID == sessionID && self.currentState != .idle)
             self.stateLock.unlock()
             if stillActive {
-                AFMDevLogger.shared.log("VOICE-INPUT: Session \(sessionID) watchdog expired after 25s, auto-resetting")
-                self.handleFailure("語音輸入逾時（25秒），已自動重設", sessionID: sessionID)
+                AFMDevLogger.shared.log("VOICE-INPUT: Session \(sessionID) watchdog expired after 300s, auto-resetting")
+                self.handleFailure("語音輸入逾時（5分鐘），已自動重設", sessionID: sessionID)
             }
         }
         self.sessionWatchdogWorkItem = watchdog
-        DispatchQueue.global().asyncAfter(deadline: .now() + 25.0, execute: watchdog)
+        DispatchQueue.global().asyncAfter(deadline: .now() + 300.0, execute: watchdog)
 
         AFMDevLogger.shared.log("VOICE-INPUT: Starting session \(sessionID) [mode=\(mode.rawValue)]")
 
@@ -644,7 +644,7 @@ public final class VoiceInputManager: NSObject, @unchecked Sendable {
             }
         }
 
-        // 3. Fallback timer: if server doesn't respond with 'done' within 1.2s, force finish
+        // 3. Fallback timer: if server doesn't respond with 'done' within 4.5s, force finish
         fallbackDoneTimer?.cancel()
         let timerItem = DispatchWorkItem { [weak self] in
             guard let self = self else { return }
@@ -658,7 +658,7 @@ public final class VoiceInputManager: NSObject, @unchecked Sendable {
             }
         }
         self.fallbackDoneTimer = timerItem
-        DispatchQueue.global().asyncAfter(deadline: .now() + 1.2, execute: timerItem)
+        DispatchQueue.global().asyncAfter(deadline: .now() + 4.5, execute: timerItem)
     }
 
     public func cancel() {
@@ -722,8 +722,13 @@ public final class VoiceInputManager: NSObject, @unchecked Sendable {
         webSocketTask = nil
 
         var rawTranscript = self.accumulatedFinalText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if rawTranscript.isEmpty {
-            rawTranscript = self.latestPartialText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let partial = self.latestPartialText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !partial.isEmpty && !rawTranscript.contains(partial) {
+            if !rawTranscript.isEmpty {
+                rawTranscript += " " + partial
+            } else {
+                rawTranscript = partial
+            }
         }
         let context = self.precedingContext
         let mode = self.currentMode
@@ -757,7 +762,7 @@ public final class VoiceInputManager: NSObject, @unchecked Sendable {
         inFlightPolishTask = Task { [weak self] in
             guard let self = self else { return }
 
-            let maxTimeout: Double = (mode == .helpMeWrite ? 8.0 : 4.0)
+            let maxTimeout: Double = (mode == .helpMeWrite ? 15.0 : 10.0)
 
             let polishedResult: String = await withTaskGroup(of: String?.self) { group in
                 group.addTask {

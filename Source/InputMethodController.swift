@@ -293,7 +293,7 @@ extension CandidateController {
 }
 
 struct SmaiVersion {
-    static let current = "1.4.3"
+    static let current = "1.4.4"
     static let build = "20261028"
     static var displayString: String {
         return "v\(current) (Build \(build))"
@@ -870,12 +870,8 @@ class McBopomofoInputMethodController: IMKInputController {
                     voiceStartedByHold = false
                     voiceKeyDownTimestamp = nil
                     if case .polishing = VoiceInputManager.shared.currentState {
-                        VoiceInputManager.shared.cancel()
-                        (client as? IMKTextInput)?.setMarkedText(
-                            "",
-                            selectionRange: NSRange(location: 0, length: 0),
-                            replacementRange: NSRange(location: NSNotFound, length: NSNotFound)
-                        )
+                        // While polishing, ignore duplicate Option+V press so speech is not cancelled
+                        return true
                     } else {
                         VoiceInputManager.shared.stopAndPolish()
                     }

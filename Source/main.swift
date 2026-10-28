@@ -1179,7 +1179,8 @@ if CommandLine.arguments.count > 1 {
         let v4 = VersionUpdateApi.isRemoteVersionNewer(current: "1.4.1", remote: "v1.4.2") == true
         let v5 = VersionUpdateApi.isRemoteVersionNewer(current: "1.4.1", remote: "2.0.0") == true
         let v6 = VersionUpdateApi.isRemoteVersionNewer(current: "1.4.1", remote: "1.4.1.1") == true
-        let semVerOk = v1 && v2 && v3 && v4 && v5 && v6
+        let v7 = VersionUpdateApi.isRemoteVersionNewer(current: "1.4.3", remote: "v1.4.4") == true
+        let semVerOk = v1 && v2 && v3 && v4 && v5 && v6 && v7
         check("更新機制：GitHub Releases 語意版本號比對 (SemVer 嚴格檢查)", passed: semVerOk)
 
         // --- 7. 前文滾動脈絡歷史管理器 ---
